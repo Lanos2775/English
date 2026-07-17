@@ -1313,12 +1313,44 @@ document.getElementById("wh-export-copy").addEventListener("click", () => {
 document.getElementById("wh-import-btn").addEventListener("click", () => {
   document.getElementById("wh-import-file").click();
 });
+
+/* Parse a .txt file into blocks: a line starting with "#" starts a new
+   named list; subsequent "en - vi" lines belong to that list. Lines that
+   appear before any "#" header go into a null-name block (handled by
+   falling back to the currently active list on import). */
+function parseTxtIntoLists(text) {
+  const lines = text.split("\n");
+  const blocks = [];
+  let current = null;
+  lines.forEach((raw) => {
+    const line = raw.trim();
+    if (!line) return;
+    if (line.startsWith("#")) {
+      current = { name: line.replace(/^#+/, "").trim() || "Danh sách nhập", items: [] };
+      blocks.push(current);
+      return;
+    }
+    if (!current) {
+      current = { name: null, items: [] };
+      blocks.push(current);
+    }
+    const sep = line.includes("-->") ? "-->" : line.includes("\t") ? "\t" : "-";
+    const idx = line.indexOf(sep);
+    if (idx === -1) return;
+    const en = line.slice(0, idx).trim();
+    const vi = line.slice(idx + sep.length).trim();
+    if (en && vi) current.items.push({ id: uid(), en, vi, status: "new" });
+  });
+  return blocks;
+}
+
 document.getElementById("wh-import-file").addEventListener("change", (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
+      let listsCreated = 0;
       if (file.name.endsWith(".json")) {
         const data = JSON.parse(reader.result);
         const lists = Array.isArray(data) ? data : [data];
@@ -1326,24 +1358,39 @@ document.getElementById("wh-import-file").addEventListener("change", (e) => {
           const newList = defaultList(l.name || "Danh sách nhập");
           (l.items || []).forEach((i) => newList.items.push({ id: uid(), en: i.en, vi: i.vi, status: "new" }));
           getCategory(wh.cat).push(newList);
+          state.activeWhList[wh.cat] = newList.id;
+          listsCreated++;
         });
       } else {
-        const list = whActiveList() || (() => { addWhList(); return whActiveList(); })();
-        reader.result.split("\n").forEach((line) => {
-          line = line.trim();
-          if (!line || line.startsWith("#")) return;
-          const sep = line.includes("-->") ? "-->" : line.includes("\t") ? "\t" : "-";
-          const idx = line.indexOf(sep);
-          if (idx === -1) return;
-          const en = line.slice(0, idx).trim();
-          const vi = line.slice(idx + sep.length).trim();
-          if (en && vi) list.items.push({ id: uid(), en, vi, status: "new" });
+        const blocks = parseTxtIntoLists(reader.result);
+        blocks.forEach((block) => {
+          if (!block.items.length) return;
+          let targetList;
+          if (block.name) {
+            // "#Tên" header -> create (or reuse) a list with that exact name
+            targetList = getCategory(wh.cat).find((l) => l.name === block.name);
+            if (!targetList) {
+              targetList = defaultList(block.name);
+              getCategory(wh.cat).push(targetList);
+              listsCreated++;
+            }
+          } else {
+            // no header before these lines -> fall back to the active list
+            targetList = whActiveList();
+            if (!targetList) {
+              targetList = defaultList("Danh sách nhập");
+              getCategory(wh.cat).push(targetList);
+              listsCreated++;
+            }
+          }
+          targetList.items.push(...block.items);
+          state.activeWhList[wh.cat] = targetList.id;
         });
       }
       saveState();
       renderWarehouseTab();
       whExportOverlay.classList.add("hidden");
-      showToast("Nhập file thành công!");
+      showToast(listsCreated > 0 ? `Nhập file thành công! Đã tạo ${listsCreated} danh sách mới.` : "Nhập file thành công!");
     } catch (err) {
       showToast("Không đọc được file: " + err.message);
     }
