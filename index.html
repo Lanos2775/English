@@ -1,707 +1,348 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AetherVocab - Premium Offline English Flashcards</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nox — Học từ vựng</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Ambient background glow elements -->
-  <div class="ambient-glow glow-1"></div>
-  <div class="ambient-glow glow-2"></div>
 
-  <div class="app-container">
-    <!-- Sidebar: Statistics, Lists, Settings -->
-    <aside class="sidebar-panel glass-panel">
-      <div class="sidebar-header">
-        <div class="logo-wrapper">
-          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-          </svg>
-          <h1>AetherVocab</h1>
-        </div>
-        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme (T)">
-          <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="5"></circle>
-            <line x1="12" y1="1" x2="12" y2="3"></line>
-            <line x1="12" y1="21" x2="12" y2="23"></line>
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-            <line x1="1" y1="12" x2="3" y2="12"></line>
-            <line x1="21" y1="12" x2="23" y2="12"></line>
-            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-          </svg>
-          <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-          </svg>
-        </button>
-      </div>
+<div class="app-shell">
 
-      <!-- Navigation Tabs -->
-      <div class="navigation-tabs">
-        <button id="tab-flashcards" class="tab-btn active">
-          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="9" y1="3" x2="9" y2="21"></line>
-          </svg>
-          Study Cards
-        </button>
-        <button id="tab-quiz" class="tab-btn">
-          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-            <line x1="12" y1="17" x2="12.01" y2="17"></line>
-          </svg>
-          Quiz & Tests
-        </button>
-      </div>
-
-      <!-- Streak display -->
-      <div class="streak-widget glass-panel-nested">
-        <div class="streak-icon-container">
-          <svg class="fire-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
-          </svg>
-        </div>
-        <div class="streak-info">
-          <span class="streak-label">Daily Streak</span>
-          <span class="streak-value" id="streak-counter">0 Days</span>
-        </div>
-      </div>
-
-      <!-- General Statistics -->
-      <section class="stats-section">
-        <h2>Dashboard Stats</h2>
-        <div class="stats-grid">
-          <div class="stat-card">
-            <span class="stat-num" id="stat-total">0</span>
-            <span class="stat-name">Total Cards</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-num text-success" id="stat-known">0</span>
-            <span class="stat-name">Known</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-num text-warning" id="stat-learning">0</span>
-            <span class="stat-name">Learning</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-num text-danger" id="stat-difficult">0</span>
-            <span class="stat-name">Difficult</span>
-          </div>
-        </div>
-
-        <div class="progress-container">
-          <div class="progress-header">
-            <span>Overall Progress</span>
-            <span id="progress-percent">0%</span>
-          </div>
-          <div class="progress-bar-bg">
-            <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
-          </div>
-        </div>
-
-        <div class="timer-widget">
-          <svg class="timer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-          <span id="study-timer">00:00:00</span>
-        </div>
-      </section>
-
-      <!-- Deck Filters & Search -->
-      <section class="controls-section">
-        <h2>Card Management</h2>
-        
-        <div class="search-box">
-          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          <input type="text" id="deck-search" placeholder="Search cards..." autocomplete="off">
-        </div>
-
-        <div class="filter-group">
-          <button id="filter-all" class="filter-btn active">All</button>
-          <button id="filter-learning" class="filter-btn">Learning</button>
-          <button id="filter-difficult" class="filter-btn">Difficult</button>
-        </div>
-
-        <div class="sort-group">
-          <button id="sort-alpha" class="action-btn-secondary flex-center" title="Sort Alphabetically">
-            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M11 5h10M11 9h10M11 13h10M11 17h10M4 6h6M4 10h6M4 14h6M4 18h6"/>
-            </svg>
-            Sort (A-Z)
-          </button>
-          <button id="action-shuffle" class="action-btn-secondary flex-center" title="Shuffle Deck">
-            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="16 3 21 3 21 8"></polyline>
-              <line x1="4" y1="20" x2="21" y2="3"></line>
-              <polyline points="21 16 21 21 16 21"></polyline>
-              <line x1="15" y1="15" x2="21" y2="21"></line>
-              <line x1="4" y1="4" x2="9" y2="9"></line>
-            </svg>
-            Shuffle
-          </button>
-        </div>
-      </section>
-
-      <!-- Import/Export & Actions footer -->
-      <section class="footer-section">
-        <button id="btn-open-parser" class="primary-btn flex-center">
-          <svg class="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          Import / Parse Data
-        </button>
-
-        <div class="data-transfer-grid">
-          <button id="btn-export-data" class="action-btn-secondary flex-center" title="Export Cards as JSON/CSV">
-            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-            </svg>
-            Export
-          </button>
-          <button id="btn-import-file" class="action-btn-secondary flex-center" title="Import Cards from JSON/CSV/TXT">
-            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-            </svg>
-            Import File
-          </button>
-          <input type="file" id="file-input-hidden" accept=".json,.txt,.csv" style="display: none;">
-        </div>
-
-        <button id="btn-clear-deck" class="danger-btn flex-center">
-          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-          Clear All Cards
-        </button>
-      </section>
-    </aside>
-
-    <!-- Main Workspace: Card viewport and session controls -->
-    <main class="main-workspace">
-      <!-- Top Bar: Settings, Session state -->
-      <div class="top-navbar glass-panel">
-        <div class="session-info">
-          <span class="session-tag">Learning Mode</span>
-          <div class="mode-select-wrapper">
-            <select id="select-study-mode">
-              <option value="en-vi">English → Vietnamese</option>
-              <option value="vi-en">Vietnamese → English</option>
-              <option value="mixed">Mixed Random</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="top-nav-controls">
-          <!-- Voice Settings -->
-          <div class="voice-controls-popover">
-            <button id="btn-toggle-voice-settings" class="icon-btn-secondary" title="Voice / Autoplay Options">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-            </button>
-            <div id="voice-settings-dropdown" class="dropdown-menu glass-panel hidden">
-              <h3>Speech Settings</h3>
-              <div class="control-row">
-                <label for="select-tts-voice">Voice</label>
-                <select id="select-tts-voice"></select>
-              </div>
-              <div class="control-row">
-                <label for="range-tts-rate">Speed (<span id="tts-rate-val">1.0</span>x)</label>
-                <input type="range" id="range-tts-rate" min="0.5" max="2" step="0.1" value="1.0">
-              </div>
-              <div class="control-row">
-                <label for="range-tts-pitch">Pitch (<span id="tts-pitch-val">1.0</span>)</label>
-                <input type="range" id="range-tts-pitch" min="0.5" max="1.5" step="0.1" value="1.0">
-              </div>
-              <hr class="dropdown-divider">
-              <h3>Autoplay Settings</h3>
-              <div class="control-row">
-                <label for="range-autoplay-delay">Delay (<span id="autoplay-delay-val">3</span>s)</label>
-                <input type="range" id="range-autoplay-delay" min="1" max="10" step="1" value="3">
-              </div>
-            </div>
-          </div>
-
-          <!-- Weighted algorithm info indicator -->
-          <div class="weight-indicator-wrapper">
-            <span class="badge badge-info" title="Difficult cards appear 4x more often, Learning cards 2x more often, Known cards 0.5x. Failed cards are placed in a short queue to reappear within 3 cards.">
-              Weighted Queue Enabled
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Card Area with Swipe & Flip Visuals -->
-      <div class="flashcard-playground">
-        <div id="deck-empty-state" class="empty-state glass-panel hidden">
-          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="9" y1="9" x2="15" y2="15"></line>
-            <line x1="15" y1="9" x2="9" y2="15"></line>
-          </svg>
-          <h2>Your vocabulary deck is empty</h2>
-          <p>Paste your messy notes to parse them into flashcards, or import an existing CSV/JSON/TXT backup file.</p>
-          <button id="btn-empty-state-parse" class="primary-btn">Get Started</button>
-        </div>
-
-        <div id="flashcard-container" class="flashcard-container">
-          <!-- Back stack cards visual effect -->
-          <div class="stack-card stack-card-3"></div>
-          <div class="stack-card stack-card-2"></div>
-          <div class="stack-card stack-card-1"></div>
-
-          <!-- Dynamic active flashcard -->
-          <div id="flashcard-element" class="flashcard-element">
-            <div class="flashcard-inner">
-              <!-- Front Side -->
-              <div class="card-face card-front">
-                <div class="card-status-pill" id="card-status-indicator-front">LEARNING</div>
-                <div class="card-content-wrapper">
-                  <p class="card-text" id="card-text-front">Phrase goes here...</p>
-                  <p class="card-context-hint" id="card-hint-front">Press Space to flip</p>
-                </div>
-                <div class="card-footer-controls">
-                  <button id="btn-speak-front" class="speak-btn icon-btn" title="Speak Aloud (S)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Back Side -->
-              <div class="card-face card-back">
-                <div class="card-status-pill" id="card-status-indicator-back">LEARNING</div>
-                <div class="card-content-wrapper">
-                  <p class="card-text" id="card-text-back">Translation goes here...</p>
-                  <p class="card-context-hint" id="card-hint-back">Press Space to flip back</p>
-                </div>
-                <div class="card-footer-controls">
-                  <button id="btn-speak-back" class="speak-btn icon-btn" title="Speak Aloud (S)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <!-- Swipe directional indicators overlay -->
-            <div class="swipe-overlay swipe-left-overlay">DIFFICULT</div>
-            <div class="swipe-overlay swipe-right-overlay">KNOWN</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Action Panel & Navigation under Flashcard -->
-      <div class="study-actions-container glass-panel">
-        <div class="navigation-controls">
-          <button id="btn-prev-card" class="action-btn-secondary icon-btn-text" title="Previous (Left Arrow)">
-            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="15 18 9 12 15 6"></polyline>
-            </svg>
-            Prev
-          </button>
-
-          <span class="card-counter-indicator" id="current-card-index-indicator">0 / 0</span>
-
-          <button id="btn-next-card" class="action-btn-secondary icon-btn-text" title="Next (Right Arrow)">
-            Next
-            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"></polyline>
-            </svg>
-          </button>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="status-marking-actions">
-          <button id="btn-mark-difficult" class="status-btn mark-difficult flex-center" title="Mark Difficult (D)">
-            <span class="key-badge">D</span>
-            Difficult
-          </button>
-          <button id="btn-mark-learning" class="status-btn mark-learning flex-center" title="Mark Learning (L)">
-            <span class="key-badge">L</span>
-            Learning
-          </button>
-          <button id="btn-mark-known" class="status-btn mark-known flex-center" title="Mark Known (K)">
-            <span class="key-badge">K</span>
-            Known
-          </button>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="autoplay-row">
-          <button id="btn-autoplay-toggle" class="autoplay-btn flex-center">
-            <svg class="icon-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
-            <svg class="icon-pause hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="6" y="4" width="4" height="16"></rect>
-              <rect x="14" y="4" width="4" height="16"></rect>
-            </svg>
-            Autoplay
-          </button>
-        </div>
-      </div>
-
-      <!-- Quick keyboard shortcuts info panel -->
-      <div id="flashcards-keyboard-legend" class="keyboard-legend">
-        <span><kbd>Space</kbd> Flip</span>
-        <span><kbd>&larr;</kbd> Prev</span>
-        <span><kbd>&rarr;</kbd> Next</span>
-        <span><kbd>D</kbd> Difficult</span>
-        <span><kbd>L</kbd> Learning</span>
-        <span><kbd>K</kbd> Known</span>
-        <span><kbd>S</kbd> Voice</span>
-        <span><kbd>R</kbd> Shuffle</span>
-      </div>
-
-      <!-- Quiz & Tests Playground -->
-      <div id="quiz-container" class="quiz-container hidden">
-        <!-- 1. Setup Screen -->
-        <div id="quiz-setup-screen" class="quiz-setup-screen glass-panel">
-          <h2>Configure Quiz Session</h2>
-          <div class="quiz-setup-form">
-            <div class="setup-row">
-              <label for="select-quiz-mode">Test Mode</label>
-              <select id="select-quiz-mode">
-                <option value="mc-en-vi">Multiple Choice (English → Vietnamese)</option>
-                <option value="mc-vi-en">Multiple Choice (Vietnamese → English)</option>
-                <option value="typing-en-vi">Typing Test (English → Vietnamese)</option>
-                <option value="typing-vi-en">Typing Test (Vietnamese → English)</option>
-                <option value="listening-typing">Listening (Voice → Manual Translation)</option>
-                <option value="listening-mc">Listening (Voice → Multiple Choice)</option>
-                <option value="speed-challenge">Speed Run (60s Timer Challenge)</option>
-              </select>
-            </div>
-
-            <div class="setup-row">
-              <label for="select-quiz-scope">Question Pool</label>
-              <select id="select-quiz-scope">
-                <option value="all">All Words in Deck</option>
-                <option value="difficult">Difficult Words Only</option>
-                <option value="mistakes">Review Mistakes Only</option>
-              </select>
-            </div>
-
-            <div class="setup-row">
-              <label for="select-quiz-limit">Question Count</label>
-              <select id="select-quiz-limit">
-                <option value="5">5 Questions</option>
-                <option value="10" selected>10 Questions</option>
-                <option value="20">20 Questions</option>
-                <option value="50">50 Questions</option>
-                <option value="all">All Available Words</option>
-              </select>
-            </div>
-
-            <button id="btn-start-quiz" class="primary-btn flex-center">
-              <svg class="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              Start Quiz Session
-            </button>
-          </div>
-
-          <div class="quiz-history-stats">
-            <h3>Quiz Memorization Stats</h3>
-            <div class="stats-grid">
-              <div class="stat-card">
-                <span class="stat-num" id="quiz-stat-total">0</span>
-                <span class="stat-name">Total Answered</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num text-success" id="quiz-stat-accuracy">0%</span>
-                <span class="stat-name">Avg Accuracy</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num text-warning" id="quiz-stat-streak">0</span>
-                <span class="stat-name">Best Streak</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num text-info" id="quiz-stat-time">0s</span>
-                <span class="stat-name">Avg Resp Time</span>
-              </div>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
-              <button id="btn-clear-quiz-history" class="danger-btn" style="padding: 6px 12px; font-size: 0.75rem;">Clear Quiz Stats</button>
-              <button id="btn-quiz-review-mistakes" class="action-btn-secondary hidden" style="padding: 6px 12px; font-size: 0.75rem;">Review Mistake History</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 2. Active Quiz Screen -->
-        <div id="quiz-active-screen" class="quiz-active-screen hidden">
-          <!-- Active quiz sub-header -->
-          <div class="quiz-navbar glass-panel">
-            <div class="quiz-progress-info">
-              <span id="quiz-progress-text">Question 1 of 10</span>
-              <div class="quiz-progress-bar-bg">
-                <div id="quiz-progress-bar-fill" class="quiz-progress-bar-fill" style="width: 10%"></div>
-              </div>
-            </div>
-            <div class="quiz-live-stats">
-              <div class="live-stat-item" id="quiz-live-timer-container">
-                <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <polyline points="12 6 12 12 16 14"></polyline>
-                </svg>
-                <span id="quiz-timer-text">0.0s</span>
-              </div>
-              <div class="live-stat-item">
-                <span>Streak: </span>
-                <span id="quiz-live-streak" class="text-warning font-weight-bold">0</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Question Prompt Card -->
-          <div class="quiz-question-card glass-panel flex-center">
-            <button id="btn-quiz-listening-speak" class="speak-btn icon-btn hidden" title="Repeat Voice (S)" style="width: 64px; height: 64px;">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-            </button>
-            <span id="quiz-question-text" class="question-text">Question Phrase</span>
-          </div>
-
-          <!-- Answer inputs -->
-          <div class="quiz-answers-block">
-            <!-- Grid for multiple choice options -->
-            <div id="quiz-choice-grid" class="quiz-choice-grid">
-              <button class="choice-btn" data-index="0"><span class="choice-num">1</span> <span class="choice-text">Option 1</span></button>
-              <button class="choice-btn" data-index="1"><span class="choice-num">2</span> <span class="choice-text">Option 2</span></button>
-              <button class="choice-btn" data-index="2"><span class="choice-num">3</span> <span class="choice-text">Option 3</span></button>
-              <button class="choice-btn" data-index="3"><span class="choice-num">4</span> <span class="choice-text">Option 4</span></button>
-            </div>
-
-            <!-- Block for manual typing tests -->
-            <div id="quiz-typing-block" class="quiz-typing-block glass-panel hidden">
-              <input type="text" id="quiz-typing-input" placeholder="Type the translation here..." autocomplete="off">
-              <button id="btn-quiz-typing-submit" class="primary-btn">Submit Answer</button>
-            </div>
-          </div>
-
-          <!-- Feedback notification block (Green/Red overlays) -->
-          <div id="quiz-feedback-block" class="quiz-feedback-block glass-panel hidden">
-            <div class="feedback-indicator">
-              <svg class="feedback-icon icon-success hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-              <svg class="feedback-icon icon-error hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-              <span id="quiz-feedback-title">Correct Answer!</span>
-            </div>
-            <div class="feedback-comparison">
-              <p>Your input: <span id="quiz-feedback-user-ans" class="text-danger">None</span></p>
-              <p>Correct phrase: <span id="quiz-feedback-correct-ans" class="text-success">Correct translation here</span></p>
-            </div>
-            <button id="btn-quiz-feedback-next" class="primary-btn flex-center">
-              Next Question
-              <kbd style="font-size: 0.65rem; background: rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.2)">Space</kbd>
-            </button>
-          </div>
-
-          <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
-            <button id="btn-quiz-abort" class="danger-btn">Quit Quiz Session</button>
-          </div>
-        </div>
-
-        <!-- 3. Quiz Results Screen -->
-        <div id="quiz-results-screen" class="quiz-results-screen glass-panel hidden">
-          <h2>Quiz Completed!</h2>
-          <div class="quiz-results-card">
-            <div class="results-main-percent" id="quiz-res-percent">0%</div>
-            <div class="results-label">Overall Score</div>
-            
-            <div class="stats-grid" style="margin-top: 20px;">
-              <div class="stat-card">
-                <span class="stat-num" id="quiz-res-correct">0 / 0</span>
-                <span class="stat-name">Questions Got Right</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num text-warning" id="quiz-res-streak">0</span>
-                <span class="stat-name">Session Streak</span>
-              </div>
-              <div class="stat-card">
-                <span class="stat-num text-info" id="quiz-res-time">0.0s</span>
-                <span class="stat-name">Avg Response Time</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Mistakes Review list -->
-          <div id="quiz-res-mistakes-section" class="quiz-res-mistakes-section">
-            <h3>Incorrect Answers in Session (<span id="quiz-res-mistakes-count">0</span>)</h3>
-            <div class="mistakes-list-container">
-              <ul id="quiz-res-mistakes-list" class="mistakes-list">
-                <!-- Dynamic mistakes list -->
-              </ul>
-            </div>
-          </div>
-
-          <div class="results-actions-row">
-            <button id="btn-quiz-res-mistakes-review" class="danger-btn flex-center hidden">
-              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-              </svg>
-              Review Mistakes Only
-            </button>
-            <button id="btn-quiz-res-restart" class="primary-btn flex-center">
-              Start New Quiz
-            </button>
-            <button id="btn-quiz-res-exit" class="action-btn-secondary">
-              Back to Study
-            </button>
-          </div>
-        </div>
-      </div>
-    </main>
-  </div>
-
-  <!-- Smart Parser Overlay Modal -->
-  <div id="parser-modal" class="modal-overlay hidden">
-    <div class="modal-container glass-panel">
-      <div class="modal-header">
-        <h2>Smart Bilingual Parser</h2>
-        <button id="btn-close-parser" class="icon-btn-secondary" title="Close Overlay">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
-
-      <div class="modal-body">
-        <div class="parser-input-block">
-          <div class="input-header">
-            <p class="section-hint">Paste raw texts. Mix lines, inline pairs (e.g. <code>word • meaning</code>), or separated lines.</p>
-            <button id="btn-clear-raw" class="action-btn-secondary text-danger">Clear Input</button>
-          </div>
-          <textarea id="raw-import-textarea" placeholder="Example format:&#10;hard work • công việc vất vả&#10;&#10; hoặc:&#10;that woman&#10;người phụ nữ đó&#10;&#10;hoặc:&#10;cần giúp đỡ&#10;(be) in need of help"></textarea>
-          
-          <div class="parser-action-row">
-            <button id="btn-execute-parse" class="primary-btn flex-center">
-              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12 6 12 12 16 14"></polyline>
-              </svg>
-              Parse Data
-            </button>
-          </div>
-        </div>
-
-        <div class="parser-preview-block hidden" id="parser-preview-block">
-          <div class="preview-header">
-            <h3>Parsed Cards Preview (<span id="preview-count">0</span>)</h3>
-            <div class="preview-controls-row">
-              <div class="preview-search-box">
-                <input type="text" id="preview-search-input" placeholder="Filter preview...">
-              </div>
-              <select id="preview-confidence-filter">
-                <option value="all">All Confidence</option>
-                <option value="high">High Only</option>
-                <option value="medium">Medium Only</option>
-                <option value="low">Low Only</option>
-              </select>
-              <button id="btn-preview-bulk-delete" class="danger-btn icon-btn-text" title="Delete selected cards">Delete Selected</button>
-            </div>
-          </div>
-
-          <!-- Scrollable Table Container -->
-          <div class="table-scroll-container">
-            <table class="preview-table">
-              <thead>
-                <tr>
-                  <th width="40"><input type="checkbox" id="check-select-all-preview"></th>
-                  <th width="90">Confidence</th>
-                  <th>English Phrase (Double-click to edit)</th>
-                  <th>Vietnamese Translation (Double-click to edit)</th>
-                  <th width="120">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="preview-table-body">
-                <!-- Dynamic rows parsed here -->
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Duplicate Suggestion Indicator Banner -->
-          <div id="duplicate-warning-banner" class="warning-banner hidden">
-            <div class="warning-banner-text">
-              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/>
-              </svg>
-              <span id="duplicate-warning-text">Found duplicates in input. Suggesting actions.</span>
-            </div>
-            <button id="btn-resolve-duplicates" class="action-btn-secondary">Auto Resolve (Merge)</button>
-          </div>
-
-          <div class="import-submission-row">
-            <button id="btn-re-parse" class="action-btn-secondary">Re-Parse Input</button>
-            <button id="btn-accept-import" class="primary-btn flex-center">
-              <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-              Accept & Import All
-            </button>
-          </div>
-        </div>
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1 class="brand">Nox</h1>
+      <div class="theme-level-control" id="theme-level-control" title="Màu giao diện">
+        <button class="theme-dot theme-dot-1" data-level="1" title="Trắng"></button>
+        <button class="theme-dot theme-dot-2" data-level="2" title="Ngả vàng"></button>
+        <button class="theme-dot theme-dot-3" data-level="3" title="Hồng"></button>
+        <button class="theme-dot theme-dot-4" data-level="4" title="Đen"></button>
       </div>
     </div>
-  </div>
 
-  <!-- Export Dialog Modal -->
-  <div id="export-modal" class="modal-overlay hidden">
-    <div class="modal-container glass-panel modal-sm">
-      <div class="modal-header">
-        <h2>Export Deck</h2>
-        <button id="btn-close-export" class="icon-btn-secondary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+    <nav class="main-tabs">
+      <button class="main-tab-btn active" data-tab="flashcard">Thẻ</button>
+      <button class="main-tab-btn" data-tab="writing">Viết</button>
+      <button class="main-tab-btn" data-tab="quiz">Quizz</button>
+      <button class="main-tab-btn" data-tab="warehouse">Kho</button>
+    </nav>
+
+    <!-- ---- Sidebar: Flashcard controls ---- -->
+    <div class="sidebar-panel" data-panel="flashcard">
+      <div class="stat-grid">
+        <div class="stat-box"><span class="stat-num" id="fc-stat-total">0</span><span class="stat-label">Tổng thẻ</span></div>
+        <div class="stat-box stat-learning"><span class="stat-num" id="fc-stat-learning">0</span><span class="stat-label">Đang học</span></div>
+        <div class="stat-box stat-known"><span class="stat-num" id="fc-stat-known">0</span><span class="stat-label">Đã biết</span></div>
+        <div class="stat-box stat-difficult"><span class="stat-num" id="fc-stat-difficult">0</span><span class="stat-label">Khó</span></div>
       </div>
-      <div class="modal-body">
-        <p>Select your preferred export format. Statistics include streak logs and success rates.</p>
-        
-        <div class="export-options-grid">
-          <button id="btn-export-json" class="primary-btn">JSON (Full Backup)</button>
-          <button id="btn-export-csv" class="primary-btn">CSV (Excel Compatible)</button>
-          <button id="btn-export-txt" class="primary-btn">TXT (Phrase List)</button>
-          <button id="btn-export-stats" class="primary-btn font-weight-bold">Study Stats Report</button>
+
+      <div class="panel-section">
+        <div class="section-label">Quản lý thẻ</div>
+        <input type="text" id="fc-search" class="text-input" placeholder="Tìm thẻ ...">
+        <div class="btn-row-2">
+          <button class="pill-btn active" data-filter="all">Tất cả</button>
+          <button class="pill-btn" data-filter="learning">Đang học</button>
         </div>
-        
-        <div class="copy-paste-export">
-          <label for="export-textarea-copy">Copy to Clipboard:</label>
-          <textarea id="export-textarea-copy" readonly></textarea>
-          <button id="btn-copy-clipboard-all" class="action-btn-secondary flex-center">
-            Copy to Clipboard
-          </button>
+        <div class="btn-row-2">
+          <button class="pill-btn" data-filter="known">Đã biết</button>
+          <button class="pill-btn" data-filter="difficult">Khó</button>
         </div>
+        <div class="btn-row-2">
+          <button class="pill-btn-outline" id="fc-sort-az">Sắp xếp A-Z</button>
+          <button class="pill-btn-outline" id="fc-shuffle">Xáo trộn</button>
+        </div>
+        <button class="block-btn" id="fc-reset-status">Đặt lại trạng thái</button>
+        <button class="block-btn primary" id="fc-choose-list">Chọn danh sách</button>
       </div>
     </div>
-  </div>
 
-  <script src="script.js"></script>
+    <!-- ---- Sidebar: Writing controls ---- -->
+    <div class="sidebar-panel hidden" data-panel="writing">
+      <div class="stat-grid">
+        <div class="stat-box"><span class="stat-num" id="wr-stat-total">0</span><span class="stat-label">Tổng câu</span></div>
+        <div class="stat-box stat-learning"><span class="stat-num" id="wr-stat-undone">0</span><span class="stat-label">Chưa làm</span></div>
+        <div class="stat-box stat-known"><span class="stat-num" id="wr-stat-correct">0</span><span class="stat-label">Làm đúng</span></div>
+        <div class="stat-box stat-difficult"><span class="stat-num" id="wr-stat-wrong">0</span><span class="stat-label">Làm sai</span></div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-label">Quản lý câu</div>
+        <div class="btn-row-2">
+          <button class="pill-btn" data-wfilter="all">Tất cả</button>
+          <button class="pill-btn active" data-wfilter="undone">Chưa làm</button>
+        </div>
+        <div class="btn-row-2">
+          <button class="pill-btn" data-wfilter="correct">Làm đúng</button>
+          <button class="pill-btn" data-wfilter="wrong">Làm sai</button>
+        </div>
+        <div class="btn-row-2">
+          <button class="pill-btn-outline" id="wr-sort-az">Sắp xếp A-Z</button>
+          <button class="pill-btn-outline" id="wr-shuffle">Xáo trộn</button>
+        </div>
+        <button class="block-btn" id="wr-reset-status">Đặt lại trạng thái</button>
+        <button class="block-btn primary" id="wr-choose-list">Chọn danh sách</button>
+      </div>
+    </div>
+
+    <!-- ---- Sidebar: Quiz setup ---- -->
+    <div class="sidebar-panel hidden" data-panel="quiz">
+      <div class="panel-section" id="quiz-setup-panel">
+        <div class="section-label">Nguồn</div>
+        <div class="btn-row-2">
+          <button class="pill-btn active" data-source="flashcard">Thẻ</button>
+          <button class="pill-btn" data-source="dictionary">Từ điển</button>
+        </div>
+
+        <div class="section-label">Số câu</div>
+        <div class="btn-row-2">
+          <button class="pill-btn" data-countmode="untilWrong">Chơi đến khi sai</button>
+          <button class="pill-btn active" data-countmode="custom">Tùy chỉnh số câu</button>
+        </div>
+
+        <div class="section-label">Số lượng câu</div>
+        <div class="qty-input-row" id="quiz-count-row">
+          <input type="number" id="quiz-count-input" class="text-input" value="10" min="1" max="200">
+          <span class="qty-suffix">câu</span>
+        </div>
+
+        <div class="section-label">Ngôn ngữ</div>
+        <div class="btn-row-3">
+          <button class="pill-btn active" data-lang="random">Ngẫu nhiên</button>
+          <button class="pill-btn" data-lang="e-v">E - V</button>
+          <button class="pill-btn" data-lang="v-e">V - E</button>
+        </div>
+
+        <div class="section-label">Thời gian</div>
+        <div class="btn-row-2">
+          <button class="pill-btn active" data-timemode="infinite">Vô hạn</button>
+          <button class="pill-btn" data-timemode="countdown">Tùy chỉnh đếm ngược</button>
+        </div>
+        <div class="qty-input-row hidden" id="quiz-countdown-row">
+          <input type="number" id="quiz-countdown-input" class="text-input" value="30" min="5" max="300">
+          <span class="qty-suffix">giây / câu</span>
+        </div>
+      </div>
+      <button class="block-btn primary big" id="quiz-start-btn">Bắt đầu</button>
+    </div>
+
+    <!-- ---- Sidebar: Warehouse list grid ---- -->
+    <div class="sidebar-panel hidden" data-panel="warehouse">
+      <div class="section-label" id="wh-lists-title">Thẻ</div>
+      <div class="wh-list-grid" id="wh-list-grid"></div>
+      <div class="btn-row-3">
+        <button class="icon-btn-sq" id="wh-add-list" title="Thêm danh sách">＋</button>
+        <button class="icon-btn-sq" id="wh-rename-list" title="Chỉnh sửa danh sách">✎</button>
+        <button class="icon-btn-sq" id="wh-delete-list" title="Xoá danh sách">🗑</button>
+      </div>
+      <button class="pill-btn-outline" id="wh-export-open" title="Xuất / Nhập file">⭳ Xuất / Nhập File</button>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN CONTENT ============ -->
+  <main class="main-content">
+
+    <!-- ---- Flashcard main ---- -->
+    <section class="tab-content" data-content="flashcard">
+      <div class="active-list-label" id="fc-active-label">Danh sách: —</div>
+      <div class="flashcard-stage">
+        <button class="nav-arrow" id="fc-prev">‹</button>
+        <div class="flashcard" id="fc-card">
+          <span class="card-status-pill" id="fc-card-status">Đang học</span>
+          <p class="card-text" id="fc-card-text">Chọn danh sách để bắt đầu</p>
+          <p class="card-hint">Nhấp hoặc nhấn Space để lật thẻ</p>
+        </div>
+        <button class="nav-arrow" id="fc-next">›</button>
+      </div>
+      <div class="flashcard-counter" id="fc-counter">0 / 0</div>
+      <div class="flashcard-controls">
+        <button class="status-btn status-difficult" id="fc-mark-difficult">Khó</button>
+        <button class="status-btn status-learning" id="fc-mark-learning">Đang học</button>
+        <button class="status-btn status-known" id="fc-mark-known">Đã biết</button>
+        <button class="dir-toggle-btn" id="fc-dir-toggle">E - V</button>
+      </div>
+    </section>
+
+    <!-- ---- Writing main ---- -->
+    <section class="tab-content hidden" data-content="writing">
+      <div class="active-list-label" id="wr-active-label">Danh sách: —</div>
+      <div class="writing-card">
+        <div class="writing-prompt" id="wr-prompt">Chọn danh sách để bắt đầu</div>
+      </div>
+      <div class="writing-feedback-block">
+        <div class="feedback-header">
+          <span>Phản hồi trực tiếp</span>
+          <span class="feedback-missing" id="wr-missing-badge">Còn thiếu</span>
+        </div>
+        <div class="feedback-grid" id="wr-feedback-grid"></div>
+      </div>
+      <textarea class="writing-answer-input" id="wr-answer-input" placeholder="Nhập câu trả lời tiếng anh tại đây ..."></textarea>
+      <div class="writing-btn-grid">
+        <button class="pill-btn-outline" id="wr-show-char">Hiện chữ tiếp theo (Tab)</button>
+        <button class="pill-btn-outline" id="wr-show-word">Hiện từ tiếp theo</button>
+        <button class="pill-btn-outline" id="wr-show-all">Hiện toàn bộ câu</button>
+      </div>
+      <div class="btn-row-2">
+        <button class="block-btn" id="wr-translate">Dịch</button>
+        <button class="block-btn" id="wr-answer">Đáp án</button>
+      </div>
+    </section>
+
+    <!-- ---- Quiz main ---- -->
+    <section class="tab-content hidden" data-content="quiz">
+      <div class="quiz-topbar hidden" id="quiz-topbar">
+        <button class="quiz-exit-btn" id="quiz-exit">Thoát</button>
+        <span class="quiz-pill quiz-pill-danger">Sai <span id="quiz-wrong-count">0</span>/<span id="quiz-total-count">10</span></span>
+        <span class="quiz-pill">Câu <span id="quiz-current-q">1</span>/<span id="quiz-total-q">10</span></span>
+        <span class="quiz-pill quiz-pill-success">Đúng <span id="quiz-correct-count">0</span>/<span id="quiz-total-count2">10</span></span>
+        <span class="quiz-timer">⏱ <span id="quiz-timer-val">0s</span> <button id="quiz-pause" class="timer-pause-btn">⏸</button></span>
+      </div>
+
+      <div class="quiz-empty" id="quiz-empty-state">Thiết lập câu hỏi ở thanh bên trái rồi nhấn "Bắt đầu"</div>
+
+      <div class="quiz-question-block hidden" id="quiz-question-block">
+        <div class="quiz-question-text" id="quiz-question-text">Câu hỏi ...</div>
+        <div class="quiz-choice-grid">
+          <button class="quiz-choice-btn" data-choice="0"><span class="choice-letter">A</span><span class="choice-text"></span></button>
+          <button class="quiz-choice-btn" data-choice="1"><span class="choice-letter">B</span><span class="choice-text"></span></button>
+          <button class="quiz-choice-btn" data-choice="2"><span class="choice-letter">C</span><span class="choice-text"></span></button>
+          <button class="quiz-choice-btn" data-choice="3"><span class="choice-letter">D</span><span class="choice-text"></span></button>
+        </div>
+      </div>
+
+      <div class="quiz-result-block hidden" id="quiz-result-block">
+        <div class="quiz-result-title">Hoàn thành!</div>
+        <div class="quiz-result-score" id="quiz-result-score">0 / 0</div>
+        <div class="btn-row-2">
+          <button class="block-btn primary" id="quiz-restart">Chơi lại</button>
+          <button class="block-btn" id="quiz-result-exit">Thoát</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- Warehouse (Kho) main ---- -->
+    <section class="tab-content hidden" data-content="warehouse">
+      <div class="wh-topbar">
+        <span class="wh-topbar-label">Kho</span>
+        <button class="wh-cat-btn active" data-wh-cat="flashcard">Thẻ</button>
+        <button class="wh-cat-btn" data-wh-cat="writing">Viết</button>
+        <button class="wh-cat-btn" data-wh-cat="dictionary">Từ điển</button>
+      </div>
+
+      <div class="wh-list-title" id="wh-current-list-title">Danh sách 1</div>
+
+      <div class="wh-table-wrap">
+        <div class="wh-table" id="wh-table"></div>
+      </div>
+
+      <div class="wh-toolbar">
+        <div class="wh-toolbar-right">
+          <button class="pill-btn-outline" id="wh-clear-all">Xóa hết</button>
+          <span class="wh-progress" id="wh-progress">Tiến độ: 0%</span>
+          <button class="pill-btn-outline" id="wh-reset-status">Đặt lại trạng thái</button>
+          <button class="pill-btn primary" id="wh-add-items">Thêm vào</button>
+        </div>
+      </div>
+
+      <div class="wh-legend">
+        <div class="legend-item"><span class="dot dot-learning"></span><span id="wh-legend-1">Đang học</span></div>
+        <div class="legend-item"><span class="dot dot-known"></span><span id="wh-legend-2">Đã biết</span></div>
+        <div class="legend-item"><span class="dot dot-difficult"></span><span id="wh-legend-3">Khó</span></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ POPUP: Chọn danh sách ============ -->
+<div class="overlay hidden" id="list-picker-overlay">
+  <div class="popup-panel">
+    <div class="popup-header">
+      <span id="list-picker-title">Danh sách</span>
+      <button class="popup-close" id="list-picker-close">✕</button>
+    </div>
+    <div class="popup-list" id="list-picker-body"></div>
+  </div>
+</div>
+
+<!-- ============ MODAL: Thêm vào (Kho) ============ -->
+<div class="overlay hidden" id="wh-add-overlay">
+  <div class="modal-panel">
+    <div class="popup-header">
+      <span>Thêm vào <span id="wh-add-list-name"></span></span>
+      <button class="popup-close" id="wh-add-close">✕</button>
+    </div>
+    <textarea class="modal-textarea" id="wh-add-textarea" placeholder="Nhập câu hoặc nhiều câu ở đây ...&#10;( Câu Tiếng Anh - Câu Tiếng Việt )"></textarea>
+    <div class="btn-row-2">
+      <button class="pill-btn primary flex-1" id="wh-add-confirm">Chuyển</button>
+      <button class="pill-btn-outline flex-1" id="wh-add-clear">Xóa</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: Sửa một mục (Kho) ============ -->
+<div class="overlay hidden" id="wh-edit-overlay">
+  <div class="modal-panel small">
+    <div class="popup-header">
+      <span>Sửa mục</span>
+      <button class="popup-close" id="wh-edit-close">✕</button>
+    </div>
+    <input type="text" class="text-input" id="wh-edit-en" placeholder="Câu Tiếng Anh">
+    <input type="text" class="text-input" id="wh-edit-vi" placeholder="Câu Tiếng Việt" style="margin-top:10px;">
+    <button class="block-btn primary" id="wh-edit-save" style="margin-top:14px;">Lưu</button>
+  </div>
+</div>
+
+<!-- ============ MODAL: Xuất / Nhập File (Kho) ============ -->
+<div class="overlay hidden" id="wh-export-overlay">
+  <div class="modal-panel small">
+    <div class="popup-header">
+      <span>Xuất File</span>
+      <button class="popup-close" id="wh-export-close">✕</button>
+    </div>
+    <div class="btn-row-3">
+      <button class="pill-btn-outline" id="wh-export-json">JSON</button>
+      <button class="pill-btn-outline" id="wh-export-txt">TXT</button>
+      <button class="pill-btn-outline" id="wh-export-copy">Copy</button>
+    </div>
+    <label class="radio-row"><input type="radio" name="wh-export-scope" value="all" checked> Toàn bộ danh sách</label>
+    <label class="radio-row"><input type="radio" name="wh-export-scope" value="current"> Chỉ danh sách đang được mở</label>
+    <input type="file" id="wh-import-file" accept=".json,.txt" style="display:none;">
+    <button class="block-btn" id="wh-import-btn" style="margin-top:12px;">Tải File lên</button>
+  </div>
+</div>
+
+<!-- ============ GENERIC PROMPT MODAL ============ -->
+<div class="overlay hidden" id="generic-prompt-overlay">
+  <div class="modal-panel small">
+    <div class="popup-header">
+      <span id="generic-prompt-title">Nhập</span>
+      <button class="popup-close" id="generic-prompt-cancel-x">✕</button>
+    </div>
+    <input type="text" class="text-input" id="generic-prompt-input">
+    <div class="btn-row-2" style="margin-top:14px;">
+      <button class="pill-btn primary flex-1" id="generic-prompt-ok">OK</button>
+      <button class="pill-btn-outline flex-1" id="generic-prompt-cancel">Hủy</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GENERIC CONFIRM MODAL ============ -->
+<div class="overlay hidden" id="generic-confirm-overlay">
+  <div class="modal-panel small">
+    <div class="popup-header"><span>Xác nhận</span></div>
+    <p class="confirm-message" id="generic-confirm-message"></p>
+    <div class="btn-row-2">
+      <button class="pill-btn primary flex-1" id="generic-confirm-ok">Đồng ý</button>
+      <button class="pill-btn-outline flex-1" id="generic-confirm-cancel">Hủy</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TOAST ============ -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="script.js"></script>
 </body>
 </html>

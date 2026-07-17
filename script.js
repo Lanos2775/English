@@ -1,2404 +1,1361 @@
-/**
- * AetherVocab - Pure JS Offline Vocabulary learning application.
- * Modular structure with classes for language detection, parsing, deck state, audio, and UI.
- */
+/* ============================================================
+   NOX — Ứng dụng học từ vựng (Thẻ / Viết / Quizz / Kho)
+   ============================================================ */
 
-// ==========================================
-// 1. LANGUAGE DETECTION UTILITIES
-// ==========================================
-class LanguageDetector {
-  static VIETNAMESE_DIACRITICS = /[àáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
-  
-  static ENGLISH_STOPWORDS = new Set([
-    "the", "and", "of", "to", "a", "in", "is", "that", "it", "he", "was", "for", "on", 
-    "are", "as", "with", "his", "they", "i", "at", "be", "this", "have", "from", "or", 
-    "one", "had", "by", "word", "but", "not", "what", "all", "were", "we", "when", 
-    "your", "can", "said", "there", "use", "an", "each", "which", "she", "do", "how", 
-    "their", "if", "will", "up", "other", "about", "out", "many", "then", "them", 
-    "these", "so", "some", "her", "would", "make", "like", "him", "into", "has", 
-    "look", "two", "more", "write", "go", "see", "number", "no", "way", "could", 
-    "people", "my", "than", "first", "water", "been", "called", "who", "am", "its", 
-    "now", "find", "long", "down", "day", "did", "get", "come", "made", "may", "part"
-  ]);
+const STORAGE_KEY = "nox_app_data_v1";
 
-  /**
-   * Cleans text by stripping typical punctuation, numbers, and brackets.
-   */
-  static cleanText(text) {
-    if (!text) return "";
-    return text.replace(/[•–\-\*\:\;\t]+/g, "").trim();
-  }
+function uid() {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
 
-  /**
-   * Detects whether text is English ('en') or Vietnamese ('vi') or Mixed/Unknown ('mixed')
-   */
-  static detectLanguage(text) {
-    const clean = this.cleanText(text);
-    if (!clean) return "mixed";
+function defaultList(name) {
+  return { id: uid(), name, items: [] };
+}
 
-    // 1. Match Vietnamese diacritics
-    if (this.VIETNAMESE_DIACRITICS.test(clean)) {
-      return "vi";
+function defaultState() {
+  return {
+    themeLevel: 1,
+    categories: {
+      flashcard: [defaultList("Danh sách 1")],
+      writing: [defaultList("Danh sách 1")],
+      dictionary: [defaultList("Danh sách 1")],
+    },
+    selected: { flashcard: [], writing: [] },
+    activeWhList: { flashcard: null, writing: null, dictionary: null },
+  };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaultState();
+    const parsed = JSON.parse(raw);
+    // basic shape guard
+    if (!parsed.categories) return defaultState();
+    if (!parsed.selected) parsed.selected = { flashcard: [], writing: [] };
+    if (!parsed.activeWhList) parsed.activeWhList = { flashcard: null, writing: null, dictionary: null };
+    if (!parsed.themeLevel) {
+      // migrate from old light/dark boolean theme if present
+      parsed.themeLevel = parsed.theme === "dark" ? 4 : 1;
     }
-
-    // 2. Tokenize and check stopwords & character sets
-    const words = clean.toLowerCase().split(/\s+/);
-    let stopWordCount = 0;
-    let asciiCharCount = 0;
-    
-    for (const w of words) {
-      if (this.ENGLISH_STOPWORDS.has(w)) {
-        stopWordCount++;
-      }
-    }
-
-    for (let i = 0; i < clean.length; i++) {
-      if (clean.charCodeAt(i) < 128) {
-        asciiCharCount++;
-      }
-    }
-
-    const asciiRatio = clean.length > 0 ? asciiCharCount / clean.length : 1;
-
-    // Check if it looks like English: high stop word count or extremely high ASCII ratio
-    if (stopWordCount > 0 || asciiRatio > 0.98) {
-      return "en";
-    }
-
-    // If it's pure Vietnamese but without marks (e.g. "hoc tieng anh")
-    // For safety, we classify short fragments without accents or stopwords as English by default 
-    // unless they contain typical Vietnamese letters like 'đ' (handled above)
-    return "en";
-  }
-
-  /**
-   * Computes word-level Jaccard similarity between two strings.
-   * Helps detect duplicates.
-   */
-  static getSimilarityScore(str1, str2) {
-    const getWordSet = (str) => {
-      return new Set(
-        str.toLowerCase()
-          .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
-          .split(/\s+/)
-          .filter(w => w.length > 0)
-      );
-    };
-
-    const set1 = getWordSet(str1);
-    const set2 = getWordSet(str2);
-
-    if (set1.size === 0 || set2.size === 0) return 0;
-
-    const intersection = new Set([...set1].filter(x => set2.has(x)));
-    const union = new Set([...set1, ...set2]);
-
-    return intersection.size / union.size;
+    if (parsed.themeLevel > 4) parsed.themeLevel = 4; // migrate from old 5-level scale
+    return parsed;
+  } catch (e) {
+    return defaultState();
   }
 }
 
-// ==========================================
-// 2. HEURISTIC BILINGUAL TEXT PARSER
-// ==========================================
-class SmartParser {
-  /**
-   * Main entry point to parse raw string data into a list of draft cards.
-   */
-  static parse(rawText, existingDeck = []) {
-    if (!rawText || !rawText.trim()) return [];
-
-    const lines = rawText.split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(line => {
-        // Discard empty lines, punctuation-only, or typical list headers
-        if (line.length === 0) return false;
-        if (/^[\p{P}\s]+$/u.test(line)) return false;
-        if (/^(vocabulary|word list|bài học|từ vựng|chương|unit \d+)/i.test(line)) return false;
-        return true;
-      });
-
-    const parsedPairs = [];
-    const inlineSeparators = /[•–\t\:\;]|\s-\s/; // separating marks
-
-    let unmatchedBuffer = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // 1. Check if line is inline split (e.g., "hard work • công việc vất vả")
-      if (inlineSeparators.test(line)) {
-        // Find first splitting separator
-        const match = line.match(inlineSeparators);
-        const sepIdx = line.indexOf(match[0]);
-        const left = line.substring(0, sepIdx).trim();
-        const right = line.substring(sepIdx + match[0].length).trim();
-
-        if (left && right) {
-          const leftLang = LanguageDetector.detectLanguage(left);
-          const rightLang = LanguageDetector.detectLanguage(right);
-
-          let english = left;
-          let vietnamese = right;
-
-          if (leftLang === "vi" && rightLang === "en") {
-            english = right;
-            vietnamese = left;
-          }
-
-          parsedPairs.push({
-            english: LanguageDetector.cleanText(english),
-            vietnamese: LanguageDetector.cleanText(vietnamese),
-            confidence: "high"
-          });
-          continue;
-        }
-      }
-
-      // 2. If it's a single line, push to proximity buffer
-      unmatchedBuffer.push({
-        text: LanguageDetector.cleanText(line),
-        lang: LanguageDetector.detectLanguage(line)
-      });
-    }
-
-    // 3. Process the proximity buffer to match lines
-    let bIdx = 0;
-    while (bIdx < unmatchedBuffer.length) {
-      const current = unmatchedBuffer[bIdx];
-
-      // Try to find the next item of opposite language close by (up to 3 indices away)
-      let matched = false;
-      for (let lookAhead = 1; lookAhead <= 3; lookAhead++) {
-        const nextIdx = bIdx + lookAhead;
-        if (nextIdx >= unmatchedBuffer.length) break;
-
-        const candidate = unmatchedBuffer[nextIdx];
-        if (candidate.lang !== current.lang && candidate.lang !== "mixed") {
-          // Found a match!
-          let english = current.text;
-          let vietnamese = candidate.text;
-
-          if (current.lang === "vi") {
-            english = candidate.text;
-            vietnamese = current.text;
-          }
-
-          parsedPairs.push({
-            english,
-            vietnamese,
-            confidence: lookAhead === 1 ? "high" : "medium"
-          });
-
-          // Remove both from buffer
-          unmatchedBuffer.splice(nextIdx, 1);
-          matched = true;
-          break;
-        }
-      }
-
-      if (!matched) {
-        // No match found in proximity. Pair with empty and mark Low confidence.
-        let english = "";
-        let vietnamese = "";
-
-        if (current.lang === "vi") {
-          vietnamese = current.text;
-        } else {
-          english = current.text;
-        }
-
-        parsedPairs.push({
-          english,
-          vietnamese,
-          confidence: "low"
-        });
-      }
-
-      bIdx++;
-    }
-
-    // 4. Run Duplicate & Similarity Detection
-    const finalCards = parsedPairs.map((pair, index) => {
-      const card = {
-        id: `draft_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 5)}`,
-        english: pair.english || "",
-        vietnamese: pair.vietnamese || "",
-        status: "learning",
-        confidence: pair.confidence,
-        createdAt: Date.now(),
-        lastReviewed: 0,
-        reviewCount: 0,
-        correctCount: 0,
-        incorrectCount: 0,
-        duplicateWarning: false,
-        duplicateCardId: null
-      };
-
-      // Check similarity with existing deck
-      for (const existing of existingDeck) {
-        if (card.english && existing.english) {
-          const sim = LanguageDetector.getSimilarityScore(card.english, existing.english);
-          if (sim > 0.8) {
-            card.duplicateWarning = true;
-            card.duplicateCardId = existing.id;
-            card.confidence = "low"; // Degrade confidence if it looks duplicate
-            break;
-          }
-        }
-      }
-
-      return card;
-    });
-
-    return finalCards;
-  }
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-// ==========================================
-// 3. DECK & STUDY STATE CONTROLLER
-// ==========================================
-class DeckController {
-  constructor() {
-    this.cards = [];
-    this.streak = 0;
-    this.lastReviewedDate = null;
-    this.failedQueue = []; // Holds card IDs recently failed to repeat soon
-    this.sessionReviews = 0;
-    this.sessionCorrect = 0;
-    this.sessionTimer = 0; // seconds
-    this.timerInterval = null;
+let state = loadState();
 
-    this.loadFromStorage();
+/* ------------------------------------------------------------
+   Helpers on categories/lists/items
+   ------------------------------------------------------------ */
+function getCategory(cat) {
+  return state.categories[cat];
+}
+function getList(cat, listId) {
+  return getCategory(cat).find((l) => l.id === listId);
+}
+function ensureSelected(cat) {
+  const ids = state.categories[cat].map((l) => l.id);
+  state.selected[cat] = state.selected[cat].filter((id) => ids.includes(id));
+  if (state.selected[cat].length === 0 && ids.length) state.selected[cat] = [ids[0]];
+}
+function itemsFromLists(cat, listIds) {
+  const lists = getCategory(cat).filter((l) => listIds.includes(l.id));
+  let items = [];
+  lists.forEach((l) => (items = items.concat(l.items)));
+  return items;
+}
+function allItems(cat) {
+  let items = [];
+  getCategory(cat).forEach((l) => (items = items.concat(l.items)));
+  return items;
+}
+function statusLabel(cat, status) {
+  if (cat === "writing") {
+    return { new: "Chưa làm", known: "Làm đúng", difficult: "Làm sai" }[status];
   }
+  return { new: "Đang học", known: "Đã biết", difficult: "Khó" }[status];
+}
+function shuffleArr(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
-  loadFromStorage() {
-    try {
-      const storedCards = localStorage.getItem("aethervocab_cards");
-      if (storedCards) {
-        this.cards = JSON.parse(storedCards);
+/* ============================================================
+   TAB SWITCHING
+   ============================================================ */
+const tabButtons = document.querySelectorAll(".main-tab-btn");
+const sidebarPanels = document.querySelectorAll(".sidebar-panel");
+const tabContents = document.querySelectorAll(".tab-content");
+
+function switchTab(tab) {
+  tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  sidebarPanels.forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== tab));
+  tabContents.forEach((c) => c.classList.toggle("hidden", c.dataset.content !== tab));
+  if (tab === "flashcard") renderFlashcardTab();
+  if (tab === "writing") renderWritingTab();
+  if (tab === "warehouse") renderWarehouseTab();
+}
+tabButtons.forEach((btn) => btn.addEventListener("click", () => switchTab(btn.dataset.tab)));
+
+/* ============================================================
+   THEME TOGGLE
+   ============================================================ */
+/* ============================================================
+   THEME LEVELS — 4 distinct fixed palettes (not interpolated)
+   1 = Trắng, 2 = Ngả vàng, 3 = Hồng, 4 = Đen
+   ============================================================ */
+const THEME_PALETTES = {
+  1: { // Trắng
+    bg: "#f5f5f7", panel: "#ffffff", border: "#1f1f24", borderSoft: "#d8d8de",
+    text: "#17171b", textMuted: "#6b6b76", accent: "#7c3aed", accentSoft: "#efe6ff",
+    learningSoft: "#fff2dc", knownSoft: "#dff7ec", difficultSoft: "#fde3e2",
+  },
+  2: { // Ngả vàng
+    bg: "#f5ecd7", panel: "#fbf4e4", border: "#3a2f18", borderSoft: "#e0d3ad",
+    text: "#2b2410", textMuted: "#7d6d44", accent: "#7c3aed", accentSoft: "#f0e2c0",
+    learningSoft: "#f7e0a8", knownSoft: "#dcead0", difficultSoft: "#f5d3bd",
+  },
+  3: { // Hồng
+    bg: "#fbe0ea", panel: "#fff3f7", border: "#3a1a26", borderSoft: "#f0c9d8",
+    text: "#2b0e18", textMuted: "#8a5a6c", accent: "#7c3aed", accentSoft: "#fbd9e8",
+    learningSoft: "#fde0c0", knownSoft: "#dcefe0", difficultSoft: "#fbccd6",
+  },
+  4: { // Đen
+    bg: "#111114", panel: "#1a1a1f", border: "#3a3a44", borderSoft: "#2c2c34",
+    text: "#f2f2f5", textMuted: "#9a9aa6", accent: "#9d6bff", accentSoft: "#2c2140",
+    learningSoft: "#3a2c12", knownSoft: "#0f2e22", difficultSoft: "#3a1616",
+  },
+};
+function cssVarName(key) {
+  return "--" + key.replace(/([A-Z])/g, "-$1").toLowerCase();
+}
+function applyThemeLevel(level, persist = true) {
+  level = Math.min(4, Math.max(1, Math.round(level)));
+  const palette = THEME_PALETTES[level];
+  Object.keys(palette).forEach((key) => {
+    document.body.style.setProperty(cssVarName(key), palette[key]);
+  });
+  document.body.dataset.themeLevel = level;
+  document.querySelectorAll(".theme-dot").forEach((d) => d.classList.toggle("active", parseInt(d.dataset.level, 10) === level));
+  if (persist) {
+    state.themeLevel = level;
+    saveState();
+  }
+}
+document.querySelectorAll(".theme-dot").forEach((dot) => {
+  dot.addEventListener("click", () => applyThemeLevel(parseInt(dot.dataset.level, 10)));
+});
+applyThemeLevel(Math.min(4, state.themeLevel || 1), false);
+
+/* ============================================================
+   LIST PICKER POPUP (used by Thẻ + Viết "Chọn danh sách")
+   ============================================================ */
+const listPickerOverlay = document.getElementById("list-picker-overlay");
+const listPickerBody = document.getElementById("list-picker-body");
+const listPickerTitle = document.getElementById("list-picker-title");
+let listPickerCat = null;
+
+function openListPicker(cat) {
+  listPickerCat = cat;
+  listPickerTitle.textContent = cat === "flashcard" ? "Thẻ" : "Viết";
+  ensureSelected(cat);
+  renderListPickerBody();
+  listPickerOverlay.classList.remove("hidden");
+}
+function renderListPickerBody() {
+  listPickerBody.innerHTML = "";
+  getCategory(listPickerCat).forEach((list) => {
+    const row = document.createElement("div");
+    const selected = state.selected[listPickerCat].includes(list.id);
+    row.className = "popup-list-item" + (selected ? " selected" : "");
+    row.innerHTML = `<span class="dot"></span><span>${escapeHtml(list.name)}</span>`;
+    row.addEventListener("click", () => {
+      const arr = state.selected[listPickerCat];
+      const idx = arr.indexOf(list.id);
+      if (idx >= 0) {
+        if (arr.length > 1) arr.splice(idx, 1);
       } else {
-        this.cards = [];
+        arr.push(list.id);
       }
-
-      this.streak = parseInt(localStorage.getItem("aethervocab_streak")) || 0;
-      this.lastReviewedDate = localStorage.getItem("aethervocab_last_review_date");
-    } catch (e) {
-      console.error("Corrupted localStorage. Resetting data to safe state.", e);
-      this.cards = [];
-      this.streak = 0;
-      this.lastReviewedDate = null;
-      this.saveToStorage();
-    }
-  }
-
-  saveToStorage() {
-    try {
-      localStorage.setItem("aethervocab_cards", JSON.stringify(this.cards));
-      localStorage.setItem("aethervocab_streak", this.streak.toString());
-      if (this.lastReviewedDate) {
-        localStorage.setItem("aethervocab_last_review_date", this.lastReviewedDate);
-      }
-    } catch (e) {
-      alert("Lỗi lưu trữ LocalStorage: Có thể do bộ nhớ đầy.");
-    }
-  }
-
-  importCards(newCards) {
-    // Avoid importing direct duplicates
-    const addedIds = new Set();
-    const importedList = [];
-
-    for (const card of newCards) {
-      // Clean draft ID to make it standard
-      card.id = `card_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      delete card.duplicateWarning;
-      delete card.duplicateCardId;
-
-      // Double check that we don't import empty text
-      if (!card.english.trim() && !card.vietnamese.trim()) continue;
-
-      importedList.push(card);
-    }
-
-    this.cards = [...this.cards, ...importedList];
-    this.saveToStorage();
-    return importedList.length;
-  }
-
-  deleteCard(id) {
-    this.cards = this.cards.filter(c => c.id !== id);
-    this.failedQueue = this.failedQueue.filter(fid => fid !== id);
-    this.saveToStorage();
-  }
-
-  clearDeck() {
-    this.cards = [];
-    this.failedQueue = [];
-    this.saveToStorage();
-  }
-
-  /**
-   * Weighted random algorithm:
-   * - weight difficult = 4
-   * - weight learning = 2
-   * - weight known = 0.5
-   * - failed queue has a 40% priority chance to reappear in sequence
-   */
-  getNextCard(studyMode, statusFilter, searchQuery = "") {
-    let eligible = this.cards;
-
-    // Apply status filter
-    if (statusFilter !== "all") {
-      eligible = eligible.filter(c => c.status === statusFilter);
-    }
-
-    // Apply search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      eligible = eligible.filter(c => 
-        c.english.toLowerCase().includes(q) || 
-        c.vietnamese.toLowerCase().includes(q)
-      );
-    }
-
-    if (eligible.length === 0) return null;
-
-    // 40% probability to show a card from the failed queue if it exists and matches criteria
-    if (this.failedQueue.length > 0 && Math.random() < 0.4) {
-      const targetId = this.failedQueue[0];
-      const foundCard = eligible.find(c => c.id === targetId);
-      if (foundCard) {
-        // Shift it to the back of queue to rotate, but study it now
-        this.failedQueue.push(this.failedQueue.shift());
-        return foundCard;
-      } else {
-        // Card was deleted or status filter no longer matches. Remove from queue.
-        this.failedQueue = this.failedQueue.filter(id => id !== targetId);
-      }
-    }
-
-    // Weighted random selection
-    const weights = eligible.map(card => {
-      if (card.status === "difficult") return 4.0;
-      if (card.status === "learning") return 2.0;
-      return 0.5; // known
+      saveState();
+      renderListPickerBody();
+      if (listPickerCat === "flashcard") renderFlashcardTab();
+      if (listPickerCat === "writing") renderWritingTab();
     });
+    listPickerBody.appendChild(row);
+  });
+}
+document.getElementById("list-picker-close").addEventListener("click", () => listPickerOverlay.classList.add("hidden"));
+listPickerOverlay.addEventListener("click", (e) => {
+  if (e.target === listPickerOverlay) listPickerOverlay.classList.add("hidden");
+});
+document.getElementById("fc-choose-list").addEventListener("click", () => openListPicker("flashcard"));
+document.getElementById("wr-choose-list").addEventListener("click", () => openListPicker("writing"));
 
-    const sumWeights = weights.reduce((a, b) => a + b, 0);
-    let rand = Math.random() * sumWeights;
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str == null ? "" : String(str);
+  return d.innerHTML;
+}
 
-    for (let i = 0; i < eligible.length; i++) {
-      rand -= weights[i];
-      if (rand <= 0) {
-        return eligible[i];
-      }
+/* ============================================================
+   GENERIC UI UTILITIES: toast / prompt modal / confirm modal
+   (replace native alert/confirm/prompt for a consistent look)
+   ============================================================ */
+function showToast(message, duration = 2000) {
+  const container = document.getElementById("toast-container");
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = message;
+  container.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+function showPrompt(title, defaultValue = "") {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("generic-prompt-overlay");
+    const input = document.getElementById("generic-prompt-input");
+    const okBtn = document.getElementById("generic-prompt-ok");
+    const cancelBtn = document.getElementById("generic-prompt-cancel");
+    const cancelX = document.getElementById("generic-prompt-cancel-x");
+    document.getElementById("generic-prompt-title").textContent = title;
+    input.value = defaultValue;
+    overlay.classList.remove("hidden");
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+
+    function cleanup(val) {
+      overlay.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      cancelX.removeEventListener("click", onCancel);
+      input.removeEventListener("keydown", onKey);
+      resolve(val);
     }
-
-    return eligible[eligible.length - 1];
-  }
-
-  updateCardReview(id, isCorrect, newStatus) {
-    const card = this.cards.find(c => c.id === id);
-    if (!card) return;
-
-    card.reviewCount++;
-    card.lastReviewed = Date.now();
-    card.status = newStatus;
-
-    if (isCorrect) {
-      card.correctCount++;
-      // Remove from failed queue if it was in there
-      this.failedQueue = this.failedQueue.filter(fid => fid !== id);
-      this.sessionCorrect++;
-    } else {
-      card.incorrectCount++;
-      // Add to failed queue if not already there
-      if (!this.failedQueue.includes(id)) {
-        this.failedQueue.push(id);
-      }
+    function onOk() { cleanup(input.value.trim()); }
+    function onCancel() { cleanup(null); }
+    function onKey(e) {
+      if (e.key === "Enter") { e.preventDefault(); onOk(); }
+      if (e.key === "Escape") onCancel();
     }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    cancelX.addEventListener("click", onCancel);
+    input.addEventListener("keydown", onKey);
+  });
+}
 
-    this.sessionReviews++;
-    this.updateStreak();
-    this.saveToStorage();
-  }
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("generic-confirm-overlay");
+    const okBtn = document.getElementById("generic-confirm-ok");
+    const cancelBtn = document.getElementById("generic-confirm-cancel");
+    document.getElementById("generic-confirm-message").textContent = message;
+    overlay.classList.remove("hidden");
 
-  updateStreak() {
-    const today = new Date().toISOString().split("T")[0];
-    
-    if (this.lastReviewedDate === today) {
-      // Already reviewed today, keep streak
-      return;
+    function cleanup(val) {
+      overlay.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      resolve(val);
     }
+    function onOk() { cleanup(true); }
+    function onCancel() { cleanup(false); }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+  });
+}
 
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+/* ============================================================
+   TAB 1: THẺ (FLASHCARD)
+   ============================================================ */
+const fc = {
+  filter: "all",
+  search: "",
+  queue: [],
+  index: 0,
+  direction: "e-v", // e-v = show English first, v-e = show Vietnamese first
+  showingBack: false,
+};
 
-    if (this.lastReviewedDate === yesterday) {
-      // Reviewed yesterday, increment streak
-      this.streak++;
-    } else if (!this.lastReviewedDate) {
-      // First review ever
-      this.streak = 1;
-    } else {
-      // Streak broken, reset to 1
-      this.streak = 1;
-    }
+function statusFromFilter(f) {
+  if (f === "learning") return "new";
+  return f; // "all", "known", "difficult"
+}
 
-    this.lastReviewedDate = today;
+function fcCurrentItems() {
+  ensureSelected("flashcard");
+  let items = itemsFromLists("flashcard", state.selected.flashcard);
+  if (fc.filter !== "all") items = items.filter((i) => i.status === statusFromFilter(fc.filter));
+  if (fc.search.trim()) {
+    const q = fc.search.trim().toLowerCase();
+    items = items.filter((i) => i.en.toLowerCase().includes(q) || i.vi.toLowerCase().includes(q));
   }
+  return items;
+}
 
-  startSessionTimer() {
-    this.sessionTimer = 0;
-    if (this.timerInterval) clearInterval(this.timerInterval);
-    this.timerInterval = setInterval(() => {
-      this.sessionTimer++;
-      this.onTimerUpdate(this.getFormattedTime());
-    }, 1000);
+function rebuildFcQueue(keepIndex) {
+  const items = fcCurrentItems();
+  fc.queue = items.map((i) => i.id);
+  if (!keepIndex || fc.index >= fc.queue.length) fc.index = 0;
+  fc.showingBack = false;
+}
+
+function renderFlashcardTab() {
+  ensureSelected("flashcard");
+  const lists = getCategory("flashcard").filter((l) => state.selected.flashcard.includes(l.id));
+  document.getElementById("fc-active-label").textContent = "Danh sách: " + (lists.map((l) => l.name).join(", ") || "—");
+
+  const all = itemsFromLists("flashcard", state.selected.flashcard);
+  document.getElementById("fc-stat-total").textContent = all.length;
+  document.getElementById("fc-stat-learning").textContent = all.filter((i) => i.status === "new").length;
+  document.getElementById("fc-stat-known").textContent = all.filter((i) => i.status === "known").length;
+  document.getElementById("fc-stat-difficult").textContent = all.filter((i) => i.status === "difficult").length;
+
+  rebuildFcQueue(true);
+  renderFcCard();
+}
+
+function fcItemById(id) {
+  for (const l of getCategory("flashcard")) {
+    const found = l.items.find((i) => i.id === id);
+    if (found) return found;
   }
+  return null;
+}
 
-  getFormattedTime() {
-    const hrs = String(Math.floor(this.sessionTimer / 3600)).padStart(2, '0');
-    const mins = String(Math.floor((this.sessionTimer % 3600) / 60)).padStart(2, '0');
-    const secs = String(this.sessionTimer % 60).padStart(2, '0');
-    return `${hrs}:${mins}:${secs}`;
+function renderFcCard() {
+  const total = fc.queue.length;
+  const counter = document.getElementById("fc-counter");
+  const textEl = document.getElementById("fc-card-text");
+  const hintEl = document.querySelector("#fc-card .card-hint");
+  const statusPill = document.getElementById("fc-card-status");
+
+  if (!total) {
+    counter.textContent = "0 / 0";
+    textEl.textContent = "Không có thẻ nào";
+    hintEl.textContent = "Hãy chọn danh sách hoặc thêm thẻ trong Kho";
+    statusPill.textContent = "";
+    statusPill.className = "card-status-pill";
+    return;
   }
+  if (fc.index >= total) fc.index = 0;
+  const item = fcItemById(fc.queue[fc.index]);
+  counter.textContent = `${fc.index + 1} / ${total}`;
 
-  getStats() {
-    const total = this.cards.length;
-    const known = this.cards.filter(c => c.status === "known").length;
-    const learning = this.cards.filter(c => c.status === "learning").length;
-    const difficult = this.cards.filter(c => c.status === "difficult").length;
-    const progressPercent = total > 0 ? Math.round((known / total) * 100) : 0;
+  let showEnglishSide;
+  if (fc.direction === "e-v") showEnglishSide = !fc.showingBack;
+  else showEnglishSide = fc.showingBack;
 
-    return { total, known, learning, difficult, progressPercent };
+  textEl.textContent = showEnglishSide ? item.en : item.vi;
+  hintEl.textContent = "Nhấp hoặc nhấn Space để lật thẻ";
+
+  statusPill.textContent = statusLabel("flashcard", item.status);
+  statusPill.className = "card-status-pill" + (item.status === "known" ? " known" : item.status === "difficult" ? " difficult" : "");
+}
+
+/* ---- Flip sound (Web Audio API, no external asset) ---- */
+let fcAudioCtx = null;
+function playFlipSound() {
+  try {
+    fcAudioCtx = fcAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = fcAudioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(520, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.13);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.16);
+  } catch (e) {
+    /* audio not available, ignore */
   }
 }
 
-// ==========================================
-// 4. TTS SPEECH SYNTHESIS CONTROLLER
-// ==========================================
-class TTSController {
-  constructor() {
-    this.synth = window.speechSynthesis;
-    this.voice = null;
-    this.rate = 1.0;
-    this.pitch = 1.0;
-    this.autoplayDelay = 3; // seconds
-    this.autoplayTimer = null;
-    this.isAutoplayActive = false;
-
-    this.initVoices();
-    if (this.synth && this.synth.onvoiceschanged !== undefined) {
-      this.synth.onvoiceschanged = () => this.initVoices();
-    }
-  }
-
-  initVoices() {
-    if (!this.synth) return;
-    const voices = this.synth.getVoices();
-    // Default to first English voice found, otherwise fallback
-    this.voice = voices.find(v => v.lang.startsWith("en")) || voices[0] || null;
-    if (this.onVoicesLoaded) {
-      this.onVoicesLoaded(voices);
-    }
-  }
-
-  setVoice(voiceName) {
-    if (!this.synth) return;
-    this.voice = this.synth.getVoices().find(v => v.name === voiceName) || this.voice;
-  }
-
-  speak(text, lang = "en", callback) {
-    if (!this.synth || !text) {
-      if (callback) callback();
-      return;
-    }
-
-    this.synth.cancel(); // Stop active speaking
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.voice = this.voice;
-    utterance.rate = this.rate;
-    utterance.pitch = this.pitch;
-    
-    if (lang === "vi") {
-      // Find Vietnamese voice if speaking Vietnamese translation
-      const viVoice = this.synth.getVoices().find(v => v.lang.startsWith("vi"));
-      if (viVoice) utterance.voice = viVoice;
-      utterance.lang = "vi-VN";
-    } else {
-      utterance.lang = "en-US";
-    }
-
-    utterance.onend = () => {
-      if (callback) callback();
-    };
-    utterance.onerror = () => {
-      if (callback) callback();
-    };
-
-    this.synth.speak(utterance);
-  }
+function flipFcCard() {
+  if (!fc.queue.length) return;
+  const cardEl = document.getElementById("fc-card");
+  playFlipSound();
+  cardEl.classList.remove("flipping");
+  void cardEl.offsetWidth; // restart animation
+  cardEl.classList.add("flipping");
+  setTimeout(() => {
+    fc.showingBack = !fc.showingBack;
+    renderFcCard();
+  }, 160);
+  setTimeout(() => cardEl.classList.remove("flipping"), 380);
 }
 
+document.getElementById("fc-card").addEventListener("click", flipFcCard);
 
-// ==========================================
-// 4.5. FUZZY MATCHER & QUIZ CONTROLLER
-// ==========================================
-class FuzzyMatcher {
-  static normalize(str) {
-    if (!str) return "";
-    return str.toLowerCase()
-      .trim()
-      .replace(/\s+/g, ' ')
-      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()!?•–]/g, '');
+function isTypingTarget() {
+  const tag = document.activeElement && document.activeElement.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
+}
+function flashcardTabVisible() {
+  const el = document.querySelector('.tab-content[data-content="flashcard"]');
+  return el && !el.classList.contains("hidden");
+}
+document.addEventListener("keydown", (e) => {
+  if (!flashcardTabVisible() || isTypingTarget()) return;
+  if (e.code === "Space") {
+    e.preventDefault();
+    flipFcCard();
+  } else if (e.code === "KeyA" || e.code === "ArrowLeft") {
+    e.preventDefault();
+    document.getElementById("fc-prev").click();
+  } else if (e.code === "KeyD" || e.code === "ArrowRight") {
+    e.preventDefault();
+    document.getElementById("fc-next").click();
   }
+});
 
-  static match(userAns, correctAns) {
-    return this.normalize(userAns) === this.normalize(correctAns);
+document.getElementById("fc-prev").addEventListener("click", () => {
+  if (!fc.queue.length) return;
+  fc.index = (fc.index - 1 + fc.queue.length) % fc.queue.length;
+  fc.showingBack = false;
+  renderFcCard();
+});
+document.getElementById("fc-next").addEventListener("click", () => {
+  if (!fc.queue.length) return;
+  fc.index = (fc.index + 1) % fc.queue.length;
+  fc.showingBack = false;
+  renderFcCard();
+});
+
+function fcMark(status) {
+  if (!fc.queue.length) return;
+  const item = fcItemById(fc.queue[fc.index]);
+  item.status = status;
+  saveState();
+  renderFlashcardTab();
+  if (fc.queue.length) {
+    fc.index = fc.index % fc.queue.length;
   }
 }
+document.getElementById("fc-mark-difficult").addEventListener("click", () => fcMark("difficult"));
+document.getElementById("fc-mark-learning").addEventListener("click", () => fcMark("new"));
+document.getElementById("fc-mark-known").addEventListener("click", () => fcMark("known"));
 
-class QuizController {
-  constructor(deckController, ttsController) {
-    this.deck = deckController;
-    this.tts = ttsController;
-    
-    this.mode = "mc-en-vi";
-    this.scope = "all";
-    this.limit = 10;
-    
-    this.questions = [];
-    this.currentIndex = 0;
-    this.score = 0;
-    this.streak = 0;
-    this.maxSessionStreak = 0;
-    
-    this.startTime = null;
-    this.questionStartTime = null;
-    this.answersLog = [];
-    this.speedChallengeTimer = null;
-    this.speedChallengeRemaining = 60; // seconds
+document.getElementById("fc-dir-toggle").addEventListener("click", (e) => {
+  fc.direction = fc.direction === "e-v" ? "v-e" : "e-v";
+  e.currentTarget.textContent = fc.direction === "e-v" ? "E - V" : "V - E";
+  fc.showingBack = false;
+  renderFcCard();
+});
 
-    this.stats = {
-      totalAnswers: 0,
-      correctAnswers: 0,
-      incorrectAnswers: 0,
-      bestStreak: 0,
-      averageResponseTime: 0,
-      mistakeHistory: []
-    };
+document.querySelectorAll('[data-filter]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-filter]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    fc.filter = btn.dataset.filter;
+    rebuildFcQueue(false);
+    renderFcCard();
+  });
+});
+document.getElementById("fc-search").addEventListener("input", (e) => {
+  fc.search = e.target.value;
+  rebuildFcQueue(false);
+  renderFcCard();
+});
+document.getElementById("fc-sort-az").addEventListener("click", () => {
+  fc.queue.sort((a, b) => fcItemById(a).en.localeCompare(fcItemById(b).en));
+  fc.index = 0;
+  renderFcCard();
+});
+document.getElementById("fc-shuffle").addEventListener("click", () => {
+  fc.queue = shuffleArr(fc.queue);
+  fc.index = 0;
+  renderFcCard();
+});
+document.getElementById("fc-reset-status").addEventListener("click", () => {
+  itemsFromLists("flashcard", state.selected.flashcard).forEach((i) => (i.status = "new"));
+  saveState();
+  renderFlashcardTab();
+});
 
-    this.loadStats();
-  }
+/* ============================================================
+   TAB 2: VIẾT (WRITING)
+   ============================================================ */
+const wr = {
+  filter: "undone",
+  queue: [],
+  index: 0,
+  revealed: 0, // number of characters revealed via hint
+  checked: false, // has current question been checked via Enter/Đáp án?
+};
 
-  loadStats() {
-    try {
-      const stored = localStorage.getItem("aethervocab_quiz_stats");
-      if (stored) {
-        this.stats = JSON.parse(stored);
-      }
-    } catch (e) {
-      console.error("Corrupted quiz stats. Resetting.", e);
-      this.saveStats();
-    }
-  }
-
-  saveStats() {
-    localStorage.setItem("aethervocab_quiz_stats", JSON.stringify(this.stats));
-  }
-
-  clearStats() {
-    this.stats = {
-      totalAnswers: 0,
-      correctAnswers: 0,
-      incorrectAnswers: 0,
-      bestStreak: 0,
-      averageResponseTime: 0,
-      mistakeHistory: []
-    };
-    this.saveStats();
-  }
-
-  generateQuestions() {
-    let pool = this.deck.cards;
-
-    if (this.scope === "difficult") {
-      pool = pool.filter(c => c.status === "difficult");
-    } else if (this.scope === "mistakes") {
-      pool = pool.filter(c => this.stats.mistakeHistory.includes(c.id));
-    }
-
-    if (pool.length === 0) return false;
-
-    // Shuffle pool
-    const shuffledPool = [...pool].sort(() => Math.random() - 0.5);
-
-    // Limit count
-    let count = 0;
-    if (this.mode === "speed-challenge") {
-      // Speed run has unlimited questions in 60s
-      count = shuffledPool.length;
-    } else {
-      count = this.limit === "all" ? shuffledPool.length : Math.min(parseInt(this.limit), shuffledPool.length);
-    }
-    const selected = shuffledPool.slice(0, count);
-
-    this.questions = selected.map(card => {
-      const isListening = this.mode.startsWith("listening");
-      const isMc = this.mode.startsWith("mc") || this.mode === "listening-mc";
-      
-      // Determine prompt and correct answer
-      let prompt = "";
-      let correctAnswer = "";
-      let lang = "en"; // language of correct answer
-
-      if (this.mode === "mc-en-vi") {
-        prompt = card.english;
-        correctAnswer = card.vietnamese;
-        lang = "vi";
-      } else if (this.mode === "mc-vi-en") {
-        prompt = card.vietnamese;
-        correctAnswer = card.english;
-        lang = "en";
-      } else if (this.mode === "typing-en-vi") {
-        prompt = card.english;
-        correctAnswer = card.vietnamese;
-        lang = "vi";
-      } else if (this.mode === "typing-vi-en") {
-        prompt = card.vietnamese;
-        correctAnswer = card.english;
-        lang = "en";
-      } else if (isListening) {
-        prompt = card.english; 
-        correctAnswer = card.vietnamese;
-        lang = "vi";
-      } else {
-        // Speed challenge defaults to Eng -> Vi
-        prompt = card.english;
-        correctAnswer = card.vietnamese;
-        lang = "vi";
-      }
-
-      // Generate Multiple Choice distractors if needed
-      let choices = [];
-      if (isMc) {
-        const correctVal = correctAnswer;
-        
-        // Find other card translations for distractors
-        const filterKey = lang === "en" ? "english" : "vietnamese";
-        const allDistractors = this.deck.cards
-          .filter(c => c.id !== card.id && c[filterKey])
-          .map(c => c[filterKey]);
-
-        // Get unique distractors
-        const uniqueDistractors = Array.from(new Set(allDistractors));
-
-        // Shuffle distractors and pick 3
-        uniqueDistractors.sort(() => Math.random() - 0.5);
-        const selectedDistractors = uniqueDistractors.slice(0, 3);
-
-        // Fill up to 3 distractors with fake ones if deck has too few words
-        while (selectedDistractors.length < 3) {
-          selectedDistractors.push(`Distractor Option ${selectedDistractors.length + 1}`);
-        }
-
-        // Add correct option and shuffle options
-        choices = [correctVal, ...selectedDistractors].sort(() => Math.random() - 0.5);
-      }
-
-      return {
-        card,
-        prompt,
-        correctAnswer,
-        choices,
-        lang
-      };
-    });
-
-    this.currentIndex = 0;
-    this.score = 0;
-    this.streak = 0;
-    this.maxSessionStreak = 0;
-    this.answersLog = [];
-    this.startTime = Date.now();
-    this.questionStartTime = Date.now();
-
-    return true;
-  }
-
-  submitAnswer(userAnswer) {
-    const q = this.questions[this.currentIndex];
-    const isMc = this.mode.startsWith("mc") || this.mode === "listening-mc";
-    
-    let isCorrect = false;
-
-    if (isMc) {
-      isCorrect = userAnswer === q.correctAnswer;
-    } else {
-      isCorrect = FuzzyMatcher.match(userAnswer, q.correctAnswer);
-    }
-
-    const respTime = (Date.now() - this.questionStartTime) / 1000; // in seconds
-
-    // Update session metrics
-    if (isCorrect) {
-      this.score++;
-      this.streak++;
-      if (this.streak > this.maxSessionStreak) {
-        this.maxSessionStreak = this.streak;
-      }
-    } else {
-      this.streak = 0;
-    }
-
-    // Record logs
-    this.answersLog.push({
-      cardId: q.card.id,
-      prompt: q.prompt,
-      correct: isCorrect,
-      userAns: userAnswer || "(Empty)",
-      correctAns: q.correctAnswer,
-      responseTime: respTime
-    });
-
-    // Update global persistent statistics
-    this.stats.totalAnswers++;
-    if (isCorrect) {
-      this.stats.correctAnswers++;
-    } else {
-      this.stats.incorrectAnswers++;
-      // Add card ID to mistakes history if not already there
-      if (!this.stats.mistakeHistory.includes(q.card.id)) {
-        this.stats.mistakeHistory.push(q.card.id);
-      }
-    }
-
-    // Update best streak
-    if (this.streak > this.stats.bestStreak) {
-      this.stats.bestStreak = this.streak;
-    }
-
-    // Recalculate average response time
-    const count = this.stats.totalAnswers;
-    const avg = this.stats.averageResponseTime;
-    this.stats.averageResponseTime = ((avg * (count - 1)) + respTime) / count;
-
-    this.saveStats();
-    return { isCorrect, correctAnswer: q.correctAnswer };
-  }
-
-  nextQuestion() {
-    this.currentIndex++;
-    this.questionStartTime = Date.now();
-    
-    if (this.mode === "speed-challenge" && this.currentIndex >= this.questions.length) {
-      // Loop questions for Speed Challenge if user runs through all words
-      const shuffledPool = [...this.questions].sort(() => Math.random() - 0.5);
-      this.questions = [...this.questions, ...shuffledPool];
-    }
-    
-    return this.currentIndex < this.questions.length;
-  }
-
-  getAccuracy() {
-    const total = this.answersLog.length;
-    if (total === 0) return 0;
-    return Math.round((this.score / total) * 100);
-  }
-
-  getAverageResponseTime() {
-    if (this.answersLog.length === 0) return 0;
-    const sum = this.answersLog.reduce((acc, log) => acc + log.responseTime, 0);
-    return (sum / this.answersLog.length).toFixed(1);
-  }
-
-  getMistakes() {
-    return this.answersLog.filter(log => !log.correct).map(log => {
-      const card = this.deck.cards.find(c => c.id === log.cardId);
-      return {
-        card,
-        userAns: log.userAns,
-        correctAns: log.correctAns
-      };
-    }).filter(m => m.card !== undefined);
-  }
+const PUNCT_REGEX = /[.,!?;:"'()…“”‘’\-]/g;
+function stripPunct(str) {
+  return str.replace(PUNCT_REGEX, "");
+}
+function normalizeAnswer(str) {
+  return stripPunct(str).replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-// ==========================================
-// 5. MASTER UI CONTROLLER
-// ==========================================
-class UIController {
-  constructor() {
-    this.deck = new DeckController();
-    this.tts = new TTSController();
+function wrStatusFromFilter(f) {
+  if (f === "undone") return "new";
+  if (f === "correct") return "known";
+  if (f === "wrong") return "difficult";
+  return f; // "all"
+}
 
-    this.activeCard = null;
-    this.isCardFlipped = false;
-    this.currentFilter = "all";
-    this.currentSearch = "";
-    
-    // Draft cards parsed and waiting for import
-    this.draftCards = [];
-
-    // Touch/Mouse swipe coordinates
-    this.swipeStartX = 0;
-    this.swipeStartY = 0;
-    this.isSwiping = false;
-
-    this.bindDOM();
-    this.init();
+function wrCurrentItems() {
+  ensureSelected("writing");
+  let items = itemsFromLists("writing", state.selected.writing);
+  if (wr.filter !== "all") items = items.filter((i) => i.status === wrStatusFromFilter(wr.filter));
+  return items;
+}
+function rebuildWrQueue(keep) {
+  const items = wrCurrentItems();
+  wr.queue = items.map((i) => i.id);
+  if (!keep || wr.index >= wr.queue.length) wr.index = 0;
+  wr.revealed = 0;
+  wr.checked = false;
+}
+function wrItemById(id) {
+  for (const l of getCategory("writing")) {
+    const found = l.items.find((i) => i.id === id);
+    if (found) return found;
   }
+  return null;
+}
 
-  bindDOM() {
-    // Buttons
-    this.themeToggleBtn = document.getElementById("theme-toggle-btn");
-    this.btnOpenParser = document.getElementById("btn-open-parser");
-    this.btnExportData = document.getElementById("btn-export-data");
-    this.btnImportFile = document.getElementById("btn-import-file");
-    this.btnClearDeck = document.getElementById("btn-clear-deck");
-    this.fileInputHidden = document.getElementById("file-input-hidden");
-    
-    // Tabs switcher DOM
-    this.tabFlashcards = document.getElementById("tab-flashcards");
-    this.tabQuiz = document.getElementById("tab-quiz");
-    this.flashcardsKeyboardLegend = document.getElementById("flashcards-keyboard-legend");
+function renderWritingTab() {
+  ensureSelected("writing");
+  const lists = getCategory("writing").filter((l) => state.selected.writing.includes(l.id));
+  document.getElementById("wr-active-label").textContent = "Danh sách: " + (lists.map((l) => l.name).join(", ") || "—");
 
-    // Quiz container & panels
-    this.quizContainer = document.getElementById("quiz-container");
-    this.quizSetupScreen = document.getElementById("quiz-setup-screen");
-    this.quizActiveScreen = document.getElementById("quiz-active-screen");
-    this.quizResultsScreen = document.getElementById("quiz-results-screen");
+  const all = itemsFromLists("writing", state.selected.writing);
+  document.getElementById("wr-stat-total").textContent = all.length;
+  document.getElementById("wr-stat-undone").textContent = all.filter((i) => i.status === "new").length;
+  document.getElementById("wr-stat-correct").textContent = all.filter((i) => i.status === "known").length;
+  document.getElementById("wr-stat-wrong").textContent = all.filter((i) => i.status === "difficult").length;
 
-    // Quiz config inputs
-    this.selectQuizMode = document.getElementById("select-quiz-mode");
-    this.selectQuizScope = document.getElementById("select-quiz-scope");
-    this.selectQuizLimit = document.getElementById("select-quiz-limit");
-    this.btnStartQuiz = document.getElementById("btn-start-quiz");
-    
-    // Quiz stats dashboard
-    this.quizStatTotal = document.getElementById("quiz-stat-total");
-    this.quizStatAccuracy = document.getElementById("quiz-stat-accuracy");
-    this.quizStatStreak = document.getElementById("quiz-stat-streak");
-    this.quizStatTime = document.getElementById("quiz-stat-time");
-    this.btnClearQuizHistory = document.getElementById("btn-clear-quiz-history");
-    this.btnQuizReviewMistakes = document.getElementById("btn-quiz-review-mistakes");
+  rebuildWrQueue(true);
+  document.getElementById("wr-answer-input").value = "";
+  renderWrQuestion();
+}
 
-    // Quiz active screen controls
-    this.quizProgressText = document.getElementById("quiz-progress-text");
-    this.quizProgressBarFill = document.getElementById("quiz-progress-bar-fill");
-    this.quizTimerText = document.getElementById("quiz-timer-text");
-    this.quizLiveStreak = document.getElementById("quiz-live-streak");
-    this.quizQuestionText = document.getElementById("quiz-question-text");
-    this.btnQuizListeningSpeak = document.getElementById("btn-quiz-listening-speak");
-    this.quizChoiceGrid = document.getElementById("quiz-choice-grid");
-    this.quizTypingBlock = document.getElementById("quiz-typing-block");
-    this.quizTypingInput = document.getElementById("quiz-typing-input");
-    this.btnQuizTypingSubmit = document.getElementById("btn-quiz-typing-submit");
-    this.quizFeedbackBlock = document.getElementById("quiz-feedback-block");
-    this.quizFeedbackTitle = document.getElementById("quiz-feedback-title");
-    this.quizFeedbackUserAns = document.getElementById("quiz-feedback-user-ans");
-    this.quizFeedbackCorrectAns = document.getElementById("quiz-feedback-correct-ans");
-    this.btnQuizFeedbackNext = document.getElementById("btn-quiz-feedback-next");
-    this.btnQuizAbort = document.getElementById("btn-quiz-abort");
+function currentWrItem() {
+  if (!wr.queue.length) return null;
+  if (wr.index >= wr.queue.length) wr.index = 0;
+  return wrItemById(wr.queue[wr.index]);
+}
 
-    // Quiz results screen controls
-    this.quizResPercent = document.getElementById("quiz-res-percent");
-    this.quizResCorrect = document.getElementById("quiz-res-correct");
-    this.quizResStreak = document.getElementById("quiz-res-streak");
-    this.quizResTime = document.getElementById("quiz-res-time");
-    this.quizResMistakesSection = document.getElementById("quiz-res-mistakes-section");
-    this.quizResMistakesCount = document.getElementById("quiz-res-mistakes-count");
-    this.quizResMistakesList = document.getElementById("quiz-res-mistakes-list");
-    this.btnQuizResMistakesReview = document.getElementById("btn-quiz-res-mistakes-review");
-    this.btnQuizResRestart = document.getElementById("btn-quiz-res-restart");
-    this.btnQuizResExit = document.getElementById("btn-quiz-res-exit");
+function resetWrQuestionState() {
+  wr.revealed = 0;
+  wr.checked = false;
+  document.getElementById("wr-answer-input").value = "";
+}
 
-    // Filter controls
-    this.searchBox = document.getElementById("deck-search");
-    this.filterAll = document.getElementById("filter-all");
-    this.filterLearning = document.getElementById("filter-learning");
-    this.filterDifficult = document.getElementById("filter-difficult");
-    this.sortAlpha = document.getElementById("sort-alpha");
-    this.actionShuffle = document.getElementById("action-shuffle");
+function wrGoNext() {
+  if (!wr.queue.length) return;
+  wr.index = (wr.index + 1) % wr.queue.length;
+  resetWrQuestionState();
+  renderWrQuestion();
+}
 
-    // Modal UI
-    this.parserModal = document.getElementById("parser-modal");
-    this.btnCloseParser = document.getElementById("btn-close-parser");
-    this.rawImportTextarea = document.getElementById("raw-import-textarea");
-    this.btnClearRaw = document.getElementById("btn-clear-raw");
-    this.btnExecuteParse = document.getElementById("btn-execute-parse");
-    
-    this.previewBlock = document.getElementById("parser-preview-block");
-    this.previewTableBody = document.getElementById("preview-table-body");
-    this.previewCount = document.getElementById("preview-count");
-    this.previewSearchInput = document.getElementById("preview-search-input");
-    this.previewConfidenceFilter = document.getElementById("preview-confidence-filter");
-    this.btnAcceptImport = document.getElementById("btn-accept-import");
-    this.btnReParse = document.getElementById("btn-re-parse");
-    this.checkSelectAllPreview = document.getElementById("check-select-all-preview");
-    this.btnPreviewBulkDelete = document.getElementById("btn-preview-bulk-delete");
-    this.duplicateWarningBanner = document.getElementById("duplicate-warning-banner");
-    this.duplicateWarningText = document.getElementById("duplicate-warning-text");
-    this.btnResolveDuplicates = document.getElementById("btn-resolve-duplicates");
-
-    // Export Modal
-    this.exportModal = document.getElementById("export-modal");
-    this.btnCloseExport = document.getElementById("btn-close-export");
-    this.btnExportJson = document.getElementById("btn-export-json");
-    this.btnExportCsv = document.getElementById("btn-export-csv");
-    this.btnExportTxt = document.getElementById("btn-export-txt");
-    this.btnExportStats = document.getElementById("btn-export-stats");
-    this.exportTextareaCopy = document.getElementById("export-textarea-copy");
-    this.btnCopyClipboardAll = document.getElementById("btn-copy-clipboard-all");
-
-    // Workspace & Session controls
-    this.selectStudyMode = document.getElementById("select-study-mode");
-    this.btnToggleVoiceSettings = document.getElementById("btn-toggle-voice-settings");
-    this.voiceSettingsDropdown = document.getElementById("voice-settings-dropdown");
-    this.selectTtsVoice = document.getElementById("select-tts-voice");
-    this.rangeTtsRate = document.getElementById("range-tts-rate");
-    this.rangeTtsPitch = document.getElementById("range-tts-pitch");
-    this.rangeAutoplayDelay = document.getElementById("range-autoplay-delay");
-    
-    this.ttsRateVal = document.getElementById("tts-rate-val");
-    this.ttsPitchVal = document.getElementById("tts-pitch-val");
-    this.autoplayDelayVal = document.getElementById("autoplay-delay-val");
-
-    // Study Panel
-    this.deckEmptyState = document.getElementById("deck-empty-state");
-    this.btnEmptyStateParse = document.getElementById("btn-empty-state-parse");
-    this.flashcardContainer = document.getElementById("flashcard-container");
-    this.flashcardElement = document.getElementById("flashcard-element");
-    
-    this.cardTextFront = document.getElementById("card-text-front");
-    this.cardTextBack = document.getElementById("card-text-back");
-    this.cardStatusIndicatorFront = document.getElementById("card-status-indicator-front");
-    this.cardStatusIndicatorBack = document.getElementById("card-status-indicator-back");
-    this.btnSpeakFront = document.getElementById("btn-speak-front");
-    this.btnSpeakBack = document.getElementById("btn-speak-back");
-
-    // Actions & controls
-    this.btnPrevCard = document.getElementById("btn-prev-card");
-    this.btnNextCard = document.getElementById("btn-next-card");
-    this.currentCardIndexIndicator = document.getElementById("current-card-index-indicator");
-    this.btnMarkDifficult = document.getElementById("btn-mark-difficult");
-    this.btnMarkLearning = document.getElementById("btn-mark-learning");
-    this.btnMarkKnown = document.getElementById("btn-mark-known");
-    
-    this.btnAutoplayToggle = document.getElementById("btn-autoplay-toggle");
-    this.iconPlay = this.btnAutoplayToggle.querySelector(".icon-play");
-    this.iconPause = this.btnAutoplayToggle.querySelector(".icon-pause");
-
-    // Dashboard Stats elements
-    this.streakCounter = document.getElementById("streak-counter");
-    this.statTotal = document.getElementById("stat-total");
-    this.statKnown = document.getElementById("stat-known");
-    this.statLearning = document.getElementById("stat-learning");
-    this.statDifficult = document.getElementById("stat-difficult");
-    this.progressPercent = document.getElementById("progress-percent");
-    this.progressBarFill = document.getElementById("progress-bar-fill");
-    this.studyTimer = document.getElementById("study-timer");
+function renderWrQuestion() {
+  const item = currentWrItem();
+  const promptEl = document.getElementById("wr-prompt");
+  if (!item) {
+    promptEl.textContent = "Không có câu nào";
+    document.getElementById("wr-feedback-grid").innerHTML = "";
+    return;
   }
+  promptEl.textContent = item.vi;
+  renderWrFeedback();
+}
 
-  init() {
-    // 1. Setup session timer
-    this.deck.onTimerUpdate = (formattedTime) => {
-      this.studyTimer.innerText = formattedTime;
-    };
-    this.deck.startSessionTimer();
+function renderWrFeedback() {
+  const item = currentWrItem();
+  const grid = document.getElementById("wr-feedback-grid");
+  const missBadge = document.getElementById("wr-missing-badge");
+  grid.innerHTML = "";
+  if (!item) return;
+  const answer = item.en;
+  const typedRaw = document.getElementById("wr-answer-input").value;
+  const typedClean = stripPunct(typedRaw);
+  let tPtr = 0;
+  let anyMissing = false;
 
-    // 1.5. Setup quiz controller
-    this.quiz = new QuizController(this.deck, this.tts);
-
-    // 2. Setup voices callbacks
-    this.tts.onVoicesLoaded = (voices) => {
-      this.selectTtsVoice.innerHTML = "";
-      voices.forEach(voice => {
-        const option = document.createElement("option");
-        option.value = voice.name;
-        option.innerText = `${voice.name} (${voice.lang})`;
-        if (voice.name === this.tts.voice?.name) {
-          option.selected = true;
-        }
-        this.selectTtsVoice.appendChild(option);
-      });
-    };
-
-    // 3. Setup event listeners
-    this.setupEventListeners();
-
-    // 4. Init theme
-    const savedTheme = localStorage.getItem("aethervocab_theme") || "dark";
-    document.documentElement.setAttribute("data-theme", savedTheme);
-
-    // 5. Initial draw
-    this.renderStats();
-    this.loadNewCard();
-    this.renderQuizStats();
-  }
-
-  setupEventListeners() {
-    // Theme toggle
-    this.themeToggleBtn.addEventListener("click", () => this.toggleTheme());
-
-    // Search and filters
-    this.searchBox.addEventListener("input", (e) => {
-      this.currentSearch = e.target.value;
-      this.loadNewCard();
-    });
-
-    this.filterAll.addEventListener("click", () => this.setFilter("all"));
-    this.filterLearning.addEventListener("click", () => this.setFilter("learning"));
-    this.filterDifficult.addEventListener("click", () => this.setFilter("difficult"));
-
-    // Sorting & shuffling
-    this.sortAlpha.addEventListener("click", () => {
-      this.deck.cards.sort((a, b) => a.english.localeCompare(b.english));
-      this.deck.saveToStorage();
-      this.renderStats();
-      this.loadNewCard();
-      alert("Đã sắp xếp thẻ theo thứ tự Alphabet.");
-    });
-    this.actionShuffle.addEventListener("click", () => {
-      // Simple shuffle in place
-      for (let i = this.deck.cards.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [this.deck.cards[i], this.deck.cards[j]] = [this.deck.cards[j], this.deck.cards[i]];
-      }
-      this.deck.saveToStorage();
-      this.loadNewCard();
-      this.triggerCardShuffleEffect();
-    });
-
-    // Opening modals
-    this.btnOpenParser.addEventListener("click", () => this.openParserModal());
-    this.btnEmptyStateParse.addEventListener("click", () => this.openParserModal());
-    this.btnCloseParser.addEventListener("click", () => this.closeParserModal());
-
-    this.btnClearRaw.addEventListener("click", () => {
-      this.rawImportTextarea.value = "";
-    });
-
-    this.btnExecuteParse.addEventListener("click", () => this.executeParse());
-
-    // Import confirmation
-    this.btnAcceptImport.addEventListener("click", () => this.acceptImport());
-    this.btnReParse.addEventListener("click", () => {
-      this.previewBlock.classList.add("hidden");
-      this.rawImportTextarea.focus();
-    });
-
-    // Export Modal Controls
-    this.btnExportData.addEventListener("click", () => this.openExportModal());
-    this.btnCloseExport.addEventListener("click", () => this.closeExportModal());
-    this.btnExportJson.addEventListener("click", () => this.exportDeck("json"));
-    this.btnExportCsv.addEventListener("click", () => this.exportDeck("csv"));
-    this.btnExportTxt.addEventListener("click", () => this.exportDeck("txt"));
-    this.btnExportStats.addEventListener("click", () => this.exportStatsReport());
-    this.btnCopyClipboardAll.addEventListener("click", () => this.copyExportToClipboard());
-
-    // File Import trigger
-    this.btnImportFile.addEventListener("click", () => this.fileInputHidden.click());
-    this.fileInputHidden.addEventListener("change", (e) => this.handleFileImport(e));
-
-    // Clear Deck
-    this.btnClearDeck.addEventListener("click", () => {
-      if (confirm("Bạn có chắc chắn muốn XÓA TOÀN BỘ thẻ học trong bộ nhớ không? Hành động này không thể hoàn tác.")) {
-        this.deck.clearDeck();
-        this.renderStats();
-        this.loadNewCard();
-      }
-    });
-
-    // Voice popover
-    this.btnToggleVoiceSettings.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.voiceSettingsDropdown.classList.toggle("hidden");
-    });
-    document.addEventListener("click", (e) => {
-      if (!this.voiceSettingsDropdown.classList.contains("hidden") && 
-          !this.voiceSettingsDropdown.contains(e.target) && 
-          e.target !== this.btnToggleVoiceSettings) {
-        this.voiceSettingsDropdown.classList.add("hidden");
-      }
-    });
-
-    // Voice controls values sync
-    this.selectTtsVoice.addEventListener("change", (e) => this.tts.setVoice(e.target.value));
-    this.rangeTtsRate.addEventListener("input", (e) => {
-      this.tts.rate = parseFloat(e.target.value);
-      this.ttsRateVal.innerText = e.target.value;
-    });
-    this.rangeTtsPitch.addEventListener("input", (e) => {
-      this.tts.pitch = parseFloat(e.target.value);
-      this.ttsPitchVal.innerText = e.target.value;
-    });
-    this.rangeAutoplayDelay.addEventListener("input", (e) => {
-      this.tts.autoplayDelay = parseInt(e.target.value);
-      this.autoplayDelayVal.innerText = e.target.value;
-    });
-
-    // Flashcard Flip & Swipe
-    this.flashcardElement.addEventListener("click", (e) => {
-      // Don't flip if clicking inner buttons
-      if (e.target.closest("button")) return;
-      this.flipCard();
-    });
-
-    // Swipe Event listeners (Mouse and Touch)
-    this.setupSwipeHandlers();
-
-    // Voice speakers inside card
-    this.btnSpeakFront.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.speakActiveFace("front");
-    });
-    this.btnSpeakBack.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.speakActiveFace("back");
-    });
-
-    // Navigation and status markers
-    this.btnPrevCard.addEventListener("click", () => this.navigateDeck(-1));
-    this.btnNextCard.addEventListener("click", () => this.navigateDeck(1));
-
-    this.btnMarkDifficult.addEventListener("click", () => this.markCardStatus("difficult"));
-    this.btnMarkLearning.addEventListener("click", () => this.markCardStatus("learning"));
-    this.btnMarkKnown.addEventListener("click", () => this.markCardStatus("known"));
-
-    this.btnAutoplayToggle.addEventListener("click", () => this.toggleAutoplay());
-
-    // Preview Table Bulk Actions
-    this.checkSelectAllPreview.addEventListener("change", (e) => {
-      const checkboxes = this.previewTableBody.querySelectorAll("input[type='checkbox']");
-      checkboxes.forEach(c => c.checked = e.target.checked);
-    });
-
-    this.btnPreviewBulkDelete.addEventListener("click", () => this.handleBulkDelete());
-
-    // Search and filter inside preview editor
-    this.previewSearchInput.addEventListener("input", () => this.renderPreviewTable());
-    this.previewConfidenceFilter.addEventListener("change", () => this.renderPreviewTable());
-
-    this.btnResolveDuplicates.addEventListener("click", () => this.resolveDuplicatesMerge());
-
-    // Tabs Toggles
-    this.tabFlashcards.addEventListener("click", () => this.switchTab("flashcards"));
-    this.tabQuiz.addEventListener("click", () => this.switchTab("quiz"));
-
-    // Quiz Setup Event Listeners
-    this.btnStartQuiz.addEventListener("click", () => this.startQuiz());
-    this.btnClearQuizHistory.addEventListener("click", () => {
-      if (confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử và thống kê Quiz không?")) {
-        this.quiz.clearStats();
-        this.renderQuizStats();
-      }
-    });
-    this.btnQuizReviewMistakes.addEventListener("click", () => {
-      this.selectQuizScope.value = "mistakes";
-      this.startQuiz();
-    });
-
-    // Quiz Active Screen Event Listeners
-    this.btnQuizListeningSpeak.addEventListener("click", () => {
-      const q = this.quiz.questions[this.quiz.currentIndex];
-      if (q) this.tts.speak(q.prompt, "en");
-    });
-    this.btnQuizTypingSubmit.addEventListener("click", () => {
-      const val = this.quizTypingInput.value.trim();
-      this.submitQuizAnswer(val);
-    });
-    this.quizTypingInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        this.btnQuizTypingSubmit.click();
-      }
-    });
-    this.btnQuizFeedbackNext.addEventListener("click", () => this.nextQuizQuestion());
-    this.btnQuizAbort.addEventListener("click", () => {
-      if (confirm("Bạn muốn hủy phiên kiểm tra hiện tại? Điểm số phiên này sẽ không được lưu.")) {
-        this.stopSpeedChallengeTimer();
-        this.switchTab("quiz");
-      }
-    });
-
-    // Option Buttons Click Listeners
-    const choiceButtons = this.quizChoiceGrid.querySelectorAll(".choice-btn");
-    choiceButtons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const choiceText = btn.querySelector(".choice-text").innerText;
-        this.submitQuizAnswer(choiceText);
-      });
-    });
-
-    // Quiz Results Event Listeners
-    this.btnQuizResRestart.addEventListener("click", () => {
-      this.switchTab("quiz");
-      this.startQuiz();
-    });
-    this.btnQuizResExit.addEventListener("click", () => this.switchTab("flashcards"));
-    this.btnQuizResMistakesReview.addEventListener("click", () => this.startQuizMistakesOnly());
-
-    // Keyboard Shortcuts
-    window.addEventListener("keydown", (e) => this.handleKeyboardShortcuts(e));
-  }
-
-  switchTab(tabName) {
-    if (tabName === "flashcards") {
-      this.tabFlashcards.classList.add("active");
-      this.tabQuiz.classList.remove("active");
-      
-      // Stop quiz speed challenge timers if active
-      this.stopSpeedChallengeTimer();
-
-      // Toggle views visibility
-      document.querySelector(".flashcard-playground").classList.remove("hidden");
-      document.querySelector(".study-actions-container").classList.remove("hidden");
-      this.flashcardsKeyboardLegend.classList.remove("hidden");
-      this.quizContainer.classList.add("hidden");
-      
-      this.loadNewCard();
-    } else if (tabName === "quiz") {
-      this.tabFlashcards.classList.remove("active");
-      this.tabQuiz.classList.add("active");
-      
-      // Stop flashcard autoplay
-      if (this.tts.isAutoplayActive) {
-        this.toggleAutoplay();
-      }
-
-      document.querySelector(".flashcard-playground").classList.add("hidden");
-      document.querySelector(".study-actions-container").classList.add("hidden");
-      this.flashcardsKeyboardLegend.classList.add("hidden");
-      
-      this.quizContainer.classList.remove("hidden");
-      this.quizSetupScreen.classList.remove("hidden");
-      this.quizActiveScreen.classList.add("hidden");
-      this.quizResultsScreen.classList.add("hidden");
-      
-      this.renderQuizStats();
+  for (let i = 0; i < answer.length; i++) {
+    const ch = answer[i];
+    if (ch === " ") {
+      const sp = document.createElement("span");
+      sp.className = "feedback-char space";
+      grid.appendChild(sp);
+      if (tPtr < typedClean.length && typedClean[tPtr] === " ") tPtr++;
+      continue;
     }
-  }
-
-  renderQuizStats() {
-    const s = this.quiz.stats;
-    this.quizStatTotal.innerText = s.totalAnswers;
-    
-    const accuracy = s.totalAnswers > 0 ? Math.round((s.correctAnswers / s.totalAnswers) * 100) : 0;
-    this.quizStatAccuracy.innerText = `${accuracy}%`;
-    this.quizStatStreak.innerText = s.bestStreak;
-    this.quizStatTime.innerText = `${s.averageResponseTime.toFixed(1)}s`;
-
-    if (s.mistakeHistory && s.mistakeHistory.length > 0) {
-      this.btnQuizReviewMistakes.classList.remove("hidden");
+    if (PUNCT_REGEX.test(ch)) {
+      PUNCT_REGEX.lastIndex = 0;
+      const sp = document.createElement("span");
+      sp.className = "feedback-char space";
+      sp.textContent = ch;
+      sp.style.color = "var(--text-muted)";
+      sp.style.borderBottom = "none";
+      grid.appendChild(sp);
+      continue; // punctuation doesn't need to be typed
+    }
+    const span = document.createElement("span");
+    span.className = "feedback-char";
+    if (tPtr < typedClean.length) {
+      const typedCh = typedClean[tPtr];
+      span.textContent = typedCh;
+      span.classList.add(typedCh.toLowerCase() === ch.toLowerCase() ? "correct" : "wrong");
+      tPtr++;
+    } else if (i < wr.revealed) {
+      span.textContent = ch;
+      span.classList.add("correct");
     } else {
-      this.btnQuizReviewMistakes.classList.add("hidden");
+      span.textContent = "_";
+      anyMissing = true;
+    }
+    grid.appendChild(span);
+  }
+  missBadge.classList.toggle("hidden", !anyMissing);
+}
+
+function renderWritingStatsOnly() {
+  const all = itemsFromLists("writing", state.selected.writing);
+  document.getElementById("wr-stat-undone").textContent = all.filter((i) => i.status === "new").length;
+  document.getElementById("wr-stat-correct").textContent = all.filter((i) => i.status === "known").length;
+  document.getElementById("wr-stat-wrong").textContent = all.filter((i) => i.status === "difficult").length;
+}
+
+function wrCheckAnswer() {
+  const item = currentWrItem();
+  if (!item) return;
+  const typed = document.getElementById("wr-answer-input").value;
+  const isCorrect = normalizeAnswer(typed) === normalizeAnswer(item.en);
+  item.status = isCorrect ? "known" : "difficult";
+  saveState();
+  wr.revealed = item.en.length;
+  renderWritingStatsOnly();
+  renderWrFeedback();
+  wr.checked = true;
+  showToast(isCorrect ? "Chính xác! 🎉" : "Chưa đúng. Đáp án: " + item.en);
+}
+
+document.getElementById("wr-answer-input").addEventListener("input", () => {
+  wr.checked = false;
+  renderWrFeedback();
+});
+document.getElementById("wr-answer-input").addEventListener("keydown", (e) => {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    revealNextChar();
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    if (!wr.checked) {
+      wrCheckAnswer();
+    } else {
+      wrGoNext();
     }
   }
+});
+function revealNextChar() {
+  const item = currentWrItem();
+  if (!item) return;
+  const input = document.getElementById("wr-answer-input");
+  if (input.value.length < item.en.length) {
+    input.value = item.en.slice(0, input.value.length + 1);
+  }
+  wr.checked = false;
+  renderWrFeedback();
+}
+function revealNextWord() {
+  const item = currentWrItem();
+  if (!item) return;
+  const input = document.getElementById("wr-answer-input");
+  const cur = input.value.length;
+  let nextSpace = item.en.indexOf(" ", cur);
+  if (nextSpace === -1) nextSpace = item.en.length;
+  else nextSpace += 1;
+  input.value = item.en.slice(0, Math.max(nextSpace, cur + 1));
+  wr.checked = false;
+  renderWrFeedback();
+}
+document.getElementById("wr-show-char").addEventListener("click", revealNextChar);
+document.getElementById("wr-show-word").addEventListener("click", revealNextWord);
+document.getElementById("wr-show-all").addEventListener("click", () => {
+  const item = currentWrItem();
+  if (!item) return;
+  document.getElementById("wr-answer-input").value = item.en;
+  wr.checked = false;
+  renderWrFeedback();
+});
+document.getElementById("wr-translate").addEventListener("click", () => {
+  const item = currentWrItem();
+  if (!item) return;
+  const url = "https://translate.google.com/?sl=vi&tl=en&text=" + encodeURIComponent(item.vi) + "&op=translate";
+  window.open(url, "_blank");
+});
+document.getElementById("wr-answer").addEventListener("click", () => {
+  const item = currentWrItem();
+  if (!item) return;
+  item.status = "difficult";
+  saveState();
+  document.getElementById("wr-answer-input").value = item.en;
+  wr.revealed = item.en.length;
+  wr.checked = true;
+  renderWritingStatsOnly();
+  renderWrFeedback();
+  showToast("Đáp án: " + item.en);
+  setTimeout(() => wrGoNext(), 1400);
+});
 
-  startQuiz() {
-    this.quiz.mode = this.selectQuizMode.value;
-    this.quiz.scope = this.selectQuizScope.value;
-    this.quiz.limit = this.selectQuizLimit.value;
+document.querySelectorAll('[data-wfilter]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-wfilter]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    wr.filter = btn.dataset.wfilter;
+    rebuildWrQueue(false);
+    resetWrQuestionState();
+    renderWrQuestion();
+  });
+});
+document.getElementById("wr-sort-az").addEventListener("click", () => {
+  wr.queue.sort((a, b) => wrItemById(a).en.localeCompare(wrItemById(b).en));
+  wr.index = 0;
+  resetWrQuestionState();
+  renderWrQuestion();
+});
+document.getElementById("wr-shuffle").addEventListener("click", () => {
+  wr.queue = shuffleArr(wr.queue);
+  wr.index = 0;
+  resetWrQuestionState();
+  renderWrQuestion();
+});
+document.getElementById("wr-reset-status").addEventListener("click", () => {
+  itemsFromLists("writing", state.selected.writing).forEach((i) => (i.status = "new"));
+  saveState();
+  renderWritingTab();
+});
 
-    const ok = this.quiz.generateQuestions();
-    if (!ok) {
-      alert("Không có đủ từ trong kho từ vựng thỏa mãn điều kiện lọc của bạn để tạo Quiz. Hãy thêm nhiều từ hơn!");
+// clicking the prompt also advances to the next question
+document.getElementById("wr-prompt").addEventListener("click", wrGoNext);
+
+/* ============================================================
+   TAB 3: QUIZZ
+   ============================================================ */
+const quiz = {
+  source: "flashcard",
+  countMode: "custom",
+  count: 10,
+  lang: "random",
+  timeMode: "infinite",
+  countdownSeconds: 30,
+  remaining: 0,
+  running: false,
+  questions: [],
+  qIndex: 0,
+  correct: 0,
+  wrong: 0,
+  timerSec: 0,
+  timerHandle: null,
+  paused: false,
+  answered: false,
+};
+
+document.querySelectorAll('[data-source]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-source]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    quiz.source = btn.dataset.source;
+  });
+});
+document.querySelectorAll('[data-countmode]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-countmode]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    quiz.countMode = btn.dataset.countmode;
+    document.getElementById("quiz-count-row").classList.toggle("hidden", quiz.countMode === "untilWrong");
+  });
+});
+document.querySelectorAll('[data-lang]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-lang]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    quiz.lang = btn.dataset.lang;
+  });
+});
+document.querySelectorAll('[data-timemode]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-timemode]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    quiz.timeMode = btn.dataset.timemode;
+    document.getElementById("quiz-countdown-row").classList.toggle("hidden", quiz.timeMode !== "countdown");
+  });
+});
+document.getElementById("quiz-countdown-input").addEventListener("input", (e) => {
+  quiz.countdownSeconds = Math.max(5, parseInt(e.target.value) || 30);
+});
+document.getElementById("quiz-count-input").addEventListener("input", (e) => {
+  quiz.count = Math.max(1, parseInt(e.target.value) || 1);
+});
+
+function buildQuizQuestions() {
+  const pool = allItems(quiz.source).filter((i) => i.en && i.vi);
+  const shuffled = shuffleArr(pool);
+  const n = quiz.countMode === "untilWrong" ? shuffled.length : Math.min(quiz.count, shuffled.length);
+  const chosen = shuffled.slice(0, n);
+  return chosen.map((item) => {
+    let dir = quiz.lang;
+    if (dir === "random") dir = Math.random() < 0.5 ? "e-v" : "v-e";
+    const questionText = dir === "e-v" ? item.en : item.vi;
+    const correctAnswer = dir === "e-v" ? item.vi : item.en;
+    const distractPool = pool.filter((p) => p !== item).map((p) => (dir === "e-v" ? p.vi : p.en));
+    const distractors = shuffleArr(distractPool).slice(0, 3);
+    const choices = shuffleArr([correctAnswer, ...distractors]);
+    return { questionText, correctAnswer, choices, item };
+  });
+}
+
+document.getElementById("quiz-start-btn").addEventListener("click", () => {
+  const pool = allItems(quiz.source).filter((i) => i.en && i.vi);
+  if (pool.length < 4) {
+    showToast("Cần ít nhất 4 mục có đủ nghĩa Anh - Việt trong nguồn đã chọn.");
+    return;
+  }
+  quiz.questions = buildQuizQuestions();
+  quiz.qIndex = 0;
+  quiz.correct = 0;
+  quiz.wrong = 0;
+  quiz.timerSec = 0;
+  quiz.paused = false;
+  quiz.running = true;
+  document.getElementById("quiz-setup-panel").classList.add("hidden");
+  document.getElementById("quiz-start-btn").classList.add("hidden");
+  document.getElementById("quiz-topbar").classList.remove("hidden");
+  document.getElementById("quiz-empty-state").classList.add("hidden");
+  document.getElementById("quiz-result-block").classList.add("hidden");
+  document.getElementById("quiz-question-block").classList.remove("hidden");
+  startQuizTimer();
+  renderQuizQuestion();
+});
+
+function startQuizTimer() {
+  clearInterval(quiz.timerHandle);
+  if (quiz.timeMode === "countdown") {
+    quiz.remaining = quiz.countdownSeconds;
+    document.getElementById("quiz-timer-val").textContent = quiz.remaining + "s";
+  } else {
+    quiz.timerSec = 0;
+    document.getElementById("quiz-timer-val").textContent = "0s";
+  }
+  quiz.timerHandle = setInterval(() => {
+    if (quiz.paused) return;
+    if (quiz.timeMode === "countdown") {
+      if (quiz.answered) return;
+      quiz.remaining--;
+      document.getElementById("quiz-timer-val").textContent = Math.max(quiz.remaining, 0) + "s";
+      if (quiz.remaining <= 0) handleQuizTimeout();
+    } else {
+      quiz.timerSec++;
+      document.getElementById("quiz-timer-val").textContent = quiz.timerSec + "s";
+    }
+  }, 1000);
+}
+function handleQuizTimeout() {
+  if (!quiz.running || quiz.answered) return;
+  quiz.answered = true;
+  const q = quiz.questions[quiz.qIndex];
+  document.querySelectorAll(".quiz-choice-btn").forEach((b) => {
+    b.disabled = true;
+    if (b.querySelector(".choice-text").textContent === q.correctAnswer) b.classList.add("correct");
+  });
+  quiz.wrong++;
+  q.item.status = "difficult";
+  saveState();
+  document.getElementById("quiz-wrong-count").textContent = quiz.wrong;
+  showToast("Hết giờ!");
+  setTimeout(() => {
+    if (quiz.countMode === "untilWrong") {
+      endQuiz();
       return;
     }
-
-    this.quizSetupScreen.classList.add("hidden");
-    this.quizResultsScreen.classList.add("hidden");
-    this.quizActiveScreen.classList.remove("hidden");
-
-    this.drawQuestion();
-
-    if (this.quiz.mode === "speed-challenge") {
-      this.startSpeedChallengeTimer();
+    quiz.qIndex++;
+    if (quiz.qIndex >= quiz.questions.length) {
+      endQuiz();
     } else {
-      this.stopSpeedChallengeTimer();
-      document.getElementById("quiz-live-timer-container").classList.remove("hidden");
-      this.quizTimerText.innerText = "0.0s";
-      
-      if (this.questionTimerInterval) clearInterval(this.questionTimerInterval);
-      this.questionTimerInterval = setInterval(() => {
-        const elapsed = (Date.now() - this.quiz.questionStartTime) / 1000;
-        this.quizTimerText.innerText = `${elapsed.toFixed(1)}s`;
-      }, 100);
+      renderQuizQuestion();
     }
+  }, 700);
+}
+document.getElementById("quiz-pause").addEventListener("click", (e) => {
+  quiz.paused = !quiz.paused;
+  e.currentTarget.textContent = quiz.paused ? "▶" : "⏸";
+});
+
+function renderQuizQuestion() {
+  quiz.answered = false;
+  if (quiz.timeMode === "countdown") {
+    quiz.remaining = quiz.countdownSeconds;
+    document.getElementById("quiz-timer-val").textContent = quiz.remaining + "s";
   }
+  const total = quiz.questions.length;
+  document.getElementById("quiz-current-q").textContent = Math.min(quiz.qIndex + 1, total);
+  document.getElementById("quiz-total-q").textContent = total;
+  document.getElementById("quiz-total-count").textContent = total;
+  document.getElementById("quiz-total-count2").textContent = total;
+  document.getElementById("quiz-correct-count").textContent = quiz.correct;
+  document.getElementById("quiz-wrong-count").textContent = quiz.wrong;
 
-  startSpeedChallengeTimer() {
-    this.quiz.speedChallengeRemaining = 60;
-    this.quizTimerText.innerText = "60s";
-    
-    if (this.questionTimerInterval) clearInterval(this.questionTimerInterval);
-    if (this.speedChallengeInterval) clearInterval(this.speedChallengeInterval);
-    
-    this.speedChallengeInterval = setInterval(() => {
-      this.quiz.speedChallengeRemaining--;
-      this.quizTimerText.innerText = `${this.quiz.speedChallengeRemaining}s`;
-      
-      // Update progress bar to represent time countdown
-      const percent = (this.quiz.speedChallengeRemaining / 60) * 100;
-      this.quizProgressBarFill.style.width = `${percent}%`;
-      this.quizProgressText.innerText = `Time Remaining: ${this.quiz.speedChallengeRemaining}s`;
+  const q = quiz.questions[quiz.qIndex];
+  document.getElementById("quiz-question-text").textContent = q.questionText;
+  const btns = document.querySelectorAll(".quiz-choice-btn");
+  btns.forEach((btn, i) => {
+    btn.classList.remove("correct", "wrong");
+    btn.querySelector(".choice-text").textContent = q.choices[i] || "";
+    btn.disabled = false;
+  });
+}
 
-      if (this.quiz.speedChallengeRemaining <= 0) {
-        this.stopSpeedChallengeTimer();
-        this.showQuizResults();
-      }
-    }, 1000);
-  }
-
-  stopSpeedChallengeTimer() {
-    if (this.speedChallengeInterval) clearInterval(this.speedChallengeInterval);
-    if (this.questionTimerInterval) clearInterval(this.questionTimerInterval);
-    this.speedChallengeInterval = null;
-    this.questionTimerInterval = null;
-  }
-
-  drawQuestion() {
-    const q = this.quiz.questions[this.quiz.currentIndex];
-    if (!q) return;
-
-    this.quizFeedbackBlock.classList.add("hidden");
-    this.quizLiveStreak.innerText = this.quiz.streak;
-
-    if (this.quiz.mode !== "speed-challenge") {
-      const qNum = this.quiz.currentIndex + 1;
-      const qTotal = this.quiz.questions.length;
-      this.quizProgressText.innerText = `Question ${qNum} of ${qTotal}`;
-      this.quizProgressBarFill.style.width = `${(qNum / qTotal) * 100}%`;
-    }
-
-    const isListening = this.quiz.mode.startsWith("listening");
-    if (isListening) {
-      this.btnQuizListeningSpeak.classList.remove("hidden");
-      this.quizQuestionText.classList.add("hidden");
-      this.tts.speak(q.prompt, "en"); // Speak automatically
-    } else {
-      this.btnQuizListeningSpeak.classList.add("hidden");
-      this.quizQuestionText.classList.remove("hidden");
-      this.quizQuestionText.innerText = q.prompt;
-    }
-
-    const isMc = this.quiz.mode.startsWith("mc") || this.quiz.mode === "listening-mc";
-    if (isMc) {
-      this.quizChoiceGrid.classList.remove("hidden");
-      this.quizTypingBlock.classList.add("hidden");
-      
-      const buttons = this.quizChoiceGrid.querySelectorAll(".choice-btn");
-      buttons.forEach((btn, idx) => {
-        btn.className = "choice-btn";
-        btn.disabled = false;
-        
-        const val = q.choices[idx];
-        if (val !== undefined) {
-          btn.style.display = "flex";
-          btn.querySelector(".choice-text").innerText = val;
-        } else {
-          btn.style.display = "none";
-        }
-      });
-    } else {
-      this.quizChoiceGrid.classList.add("hidden");
-      this.quizTypingBlock.classList.remove("hidden");
-      
-      this.quizTypingInput.value = "";
-      this.quizTypingInput.disabled = false;
-      this.btnQuizTypingSubmit.disabled = false;
-      
-      setTimeout(() => this.quizTypingInput.focus(), 100);
-    }
-  }
-
-  submitQuizAnswer(userAnswer) {
-    const q = this.quiz.questions[this.quiz.currentIndex];
-    if (!q) return;
-
-    if (!this.quizFeedbackBlock.classList.contains("hidden")) return;
-
-    if (this.quiz.mode !== "speed-challenge") {
-      if (this.questionTimerInterval) clearInterval(this.questionTimerInterval);
-    }
-
-    const { isCorrect, correctAnswer } = this.quiz.submitAnswer(userAnswer);
-
-    const isMc = this.quiz.mode.startsWith("mc") || this.quiz.mode === "listening-mc";
-    if (isMc) {
-      const buttons = this.quizChoiceGrid.querySelectorAll(".choice-btn");
-      buttons.forEach(btn => {
-        btn.disabled = true;
-        const text = btn.querySelector(".choice-text").innerText;
-        if (text === correctAnswer) {
-          btn.classList.add("correct");
-        } else if (text === userAnswer && !isCorrect) {
-          btn.classList.add("incorrect");
-        }
-      });
-    } else {
-      this.quizTypingInput.disabled = true;
-      this.btnQuizTypingSubmit.disabled = true;
-    }
-
-    this.quizFeedbackBlock.className = "quiz-feedback-block glass-panel";
-    
-    const iconSuccess = this.quizFeedbackBlock.querySelector(".icon-success");
-    const iconError = this.quizFeedbackBlock.querySelector(".icon-error");
-
-    if (isCorrect) {
-      this.quizFeedbackBlock.classList.add("correct");
-      this.quizFeedbackTitle.innerText = "Correct Answer!";
-      iconSuccess.classList.remove("hidden");
-      iconError.classList.add("hidden");
-    } else {
-      this.quizFeedbackBlock.classList.add("incorrect");
-      this.quizFeedbackTitle.innerText = "Incorrect Answer!";
-      iconSuccess.classList.add("hidden");
-      iconError.classList.remove("hidden");
-    }
-
-    this.quizFeedbackUserAns.innerText = userAnswer || "(Blank)";
-    this.quizFeedbackCorrectAns.innerText = correctAnswer;
-    this.quizFeedbackBlock.classList.remove("hidden");
-
-    this.quizLiveStreak.innerText = this.quiz.streak;
-
-    if (this.quiz.mode === "speed-challenge") {
-      setTimeout(() => {
-        this.nextQuizQuestion();
-      }, 800);
-    }
-  }
-
-  nextQuizQuestion() {
-    if (this.quiz.nextQuestion()) {
-      this.drawQuestion();
-      
-      if (this.quiz.mode !== "speed-challenge") {
-        this.quizTimerText.innerText = "0.0s";
-        if (this.questionTimerInterval) clearInterval(this.questionTimerInterval);
-        this.questionTimerInterval = setInterval(() => {
-          const elapsed = (Date.now() - this.quiz.questionStartTime) / 1000;
-          this.quizTimerText.innerText = `${elapsed.toFixed(1)}s`;
-        }, 100);
-      }
-    } else {
-      this.stopSpeedChallengeTimer();
-      this.showQuizResults();
-    }
-  }
-
-  showQuizResults() {
-    this.stopSpeedChallengeTimer();
-
-    this.quizActiveScreen.classList.add("hidden");
-    this.quizResultsScreen.classList.remove("hidden");
-
-    this.quizResPercent.innerText = `${this.quiz.getAccuracy()}%`;
-    this.quizResCorrect.innerText = `${this.quiz.score} / ${this.quiz.answersLog.length}`;
-    this.quizResStreak.innerText = this.quiz.maxSessionStreak;
-    this.quizResTime.innerText = `${this.quiz.getAverageResponseTime()}s`;
-
-    this.quizResMistakesList.innerHTML = "";
-    const mistakes = this.quiz.getMistakes();
-    this.quizResMistakesCount.innerText = mistakes.length;
-
-    if (mistakes.length === 0) {
-      this.quizResMistakesSection.classList.add("hidden");
-      this.btnQuizResMistakesReview.classList.add("hidden");
-    } else {
-      this.quizResMistakesSection.classList.remove("hidden");
-      this.btnQuizResMistakesReview.classList.remove("hidden");
-
-      mistakes.forEach(m => {
-        const li = document.createElement("li");
-        li.innerHTML = `
-          <div style="width: 100%;">
-            <strong>${m.card.english}</strong>: ${m.correctAns}
-            <div style="font-size: 0.75rem; color: var(--color-difficult); margin-top: 2px;">Your answer: "${m.userAns}"</div>
-          </div>
-        `;
-        this.quizResMistakesList.appendChild(li);
-      });
-    }
-
-    this.renderQuizStats();
-  }
-
-  startQuizMistakesOnly() {
-    this.selectQuizScope.value = "mistakes";
-    this.startQuiz();
-  }
-
-  // ==========================================
-  // VIEW RENDER & THEME METHODS
-  // ==========================================
-  toggleTheme() {
-    const current = document.documentElement.getAttribute("data-theme");
-    const next = current === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
-    localStorage.setItem("aethervocab_theme", next);
-  }
-
-  setFilter(status) {
-    this.currentFilter = status;
-    [this.filterAll, this.filterLearning, this.filterDifficult].forEach(b => b.classList.remove("active"));
-    
-    if (status === "all") this.filterAll.classList.add("active");
-    if (status === "learning") this.filterLearning.classList.add("active");
-    if (status === "difficult") this.filterDifficult.classList.add("active");
-
-    this.loadNewCard();
-  }
-
-  renderStats() {
-    const stats = this.deck.getStats();
-    
-    this.streakCounter.innerText = `${this.deck.streak} ${this.deck.streak === 1 ? 'Day' : 'Days'}`;
-    this.statTotal.innerText = stats.total;
-    this.statKnown.innerText = stats.known;
-    this.statLearning.innerText = stats.learning;
-    this.statDifficult.innerText = stats.difficult;
-    this.progressPercent.innerText = `${stats.progressPercent}%`;
-    this.progressBarFill.style.width = `${stats.progressPercent}%`;
-
-    // Empty state trigger
-    if (stats.total === 0) {
-      this.deckEmptyState.classList.remove("hidden");
-      this.flashcardContainer.classList.add("hidden");
-      this.currentCardIndexIndicator.innerText = "0 / 0";
-    } else {
-      this.deckEmptyState.classList.add("hidden");
-      this.flashcardContainer.classList.remove("hidden");
-    }
-  }
-
-  // ==========================================
-  // FLASHCARD MANAGEMENT & PLAYING
-  // ==========================================
-  loadNewCard(card = null) {
-    // Reset flip state
-    this.isCardFlipped = false;
-    this.flashcardElement.classList.remove("flipped");
-
-    const activeCard = card || this.deck.getNextCard(
-      this.selectStudyMode.value, 
-      this.currentFilter, 
-      this.currentSearch
-    );
-
-    if (!activeCard) {
-      this.activeCard = null;
-      this.renderStats();
-      return;
-    }
-
-    this.activeCard = activeCard;
-
-    // Apply study mode configuration
-    const mode = this.selectStudyMode.value;
-    let frontText = "";
-    let backText = "";
-
-    if (mode === "en-vi") {
-      frontText = activeCard.english;
-      backText = activeCard.vietnamese;
-    } else if (mode === "vi-en") {
-      frontText = activeCard.vietnamese;
-      backText = activeCard.english;
-    } else {
-      // Mixed mode
-      const isEnglishFront = Math.random() < 0.5;
-      frontText = isEnglishFront ? activeCard.english : activeCard.vietnamese;
-      backText = isEnglishFront ? activeCard.vietnamese : activeCard.english;
-    }
-
-    this.cardTextFront.innerText = frontText;
-    this.cardTextBack.innerText = backText;
-
-    // Badges update
-    const statusUpper = activeCard.status.toUpperCase();
-    [this.cardStatusIndicatorFront, this.cardStatusIndicatorBack].forEach(el => {
-      el.innerText = statusUpper;
-      el.className = "card-status-pill";
-      if (activeCard.status === "known") el.classList.add("known");
-      if (activeCard.status === "difficult") el.classList.add("difficult");
+document.querySelectorAll(".quiz-choice-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!quiz.running || quiz.answered) return;
+    quiz.answered = true;
+    const q = quiz.questions[quiz.qIndex];
+    const chosenText = btn.querySelector(".choice-text").textContent;
+    const isCorrect = chosenText === q.correctAnswer;
+    document.querySelectorAll(".quiz-choice-btn").forEach((b) => {
+      b.disabled = true;
+      if (b.querySelector(".choice-text").textContent === q.correctAnswer) b.classList.add("correct");
     });
-
-    // Update indexes display
-    const visibleCards = this.deck.cards.filter(c => {
-      const matchStatus = this.currentFilter === "all" || c.status === this.currentFilter;
-      const matchSearch = !this.currentSearch || 
-        c.english.toLowerCase().includes(this.currentSearch.toLowerCase()) ||
-        c.vietnamese.toLowerCase().includes(this.currentSearch.toLowerCase());
-      return matchStatus && matchSearch;
-    });
-
-    const index = visibleCards.findIndex(c => c.id === activeCard.id);
-    this.currentCardIndexIndicator.innerText = `${index + 1} / ${visibleCards.length}`;
-
-    this.renderStats();
-  }
-
-  flipCard() {
-    this.isCardFlipped = !this.isCardFlipped;
-
-    // Choose Y or X flipping directions randomly for tactile effect
-    const directions = ["flip-y-cw", "flip-y-ccw", "flip-x-cw", "flip-x-ccw"];
-    const chosen = directions[Math.floor(Math.random() * directions.length)];
-    
-    // Apply styling transition rotation directions inline dynamically
-    if (this.isCardFlipped) {
-      this.flashcardElement.classList.add("flipped");
+    if (!isCorrect) {
+      btn.classList.add("wrong");
+      quiz.wrong++;
+      q.item.status = "difficult";
     } else {
-      this.flashcardElement.classList.remove("flipped");
+      quiz.correct++;
+      q.item.status = "known";
     }
+    saveState();
+    document.getElementById("quiz-correct-count").textContent = quiz.correct;
+    document.getElementById("quiz-wrong-count").textContent = quiz.wrong;
 
-    // Speak aloud automatically if auto-play is running
-    if (this.tts.isAutoplayActive) {
-      // Coordinated auto-play updates handled in runAutoplayCycle()
-    }
-  }
-
-  navigateDeck(dir) {
-    const visibleCards = this.deck.cards.filter(c => {
-      const matchStatus = this.currentFilter === "all" || c.status === this.currentFilter;
-      const matchSearch = !this.currentSearch || 
-        c.english.toLowerCase().includes(this.currentSearch.toLowerCase()) ||
-        c.vietnamese.toLowerCase().includes(this.currentSearch.toLowerCase());
-      return matchStatus && matchSearch;
-    });
-
-    if (visibleCards.length <= 1) return;
-
-    let idx = visibleCards.findIndex(c => c.id === this.activeCard?.id);
-    idx = (idx + dir + visibleCards.length) % visibleCards.length;
-    this.loadNewCard(visibleCards[idx]);
-  }
-
-  markCardStatus(newStatus) {
-    if (!this.activeCard) return;
-    
-    const wasCorrect = newStatus === "known";
-    this.deck.updateCardReview(this.activeCard.id, wasCorrect, newStatus);
-    
-    // Apply micro-animation classes based on action
-    let animClass = "swiping-up";
-    if (newStatus === "known") animClass = "swiping-right";
-    if (newStatus === "difficult") animClass = "swiping-left";
-
-    this.flashcardElement.classList.add(animClass);
-    
     setTimeout(() => {
-      this.loadNewCard();
-      this.flashcardElement.className = "flashcard-element"; // Reset classes
-    }, 300);
-  }
-
-  // ==========================================
-  // SWIPE ENGINE (TOUCH & MOUSE DRAGGING)
-  // ==========================================
-  setupSwipeHandlers() {
-    const handleStart = (clientX, clientY) => {
-      if (!this.activeCard) return;
-      this.swipeStartX = clientX;
-      this.swipeStartY = clientY;
-      this.isSwiping = true;
-      this.flashcardElement.style.transition = "none";
-    };
-
-    const handleMove = (clientX, clientY) => {
-      if (!this.isSwiping) return;
-
-      const deltaX = clientX - this.swipeStartX;
-      const deltaY = clientY - this.swipeStartY;
-
-      // Apply dynamic translation and rotation styles
-      const rot = deltaX * 0.08;
-      this.flashcardElement.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(${rot}deg)`;
-
-      // Show swipe indicator text based on thresholds
-      const swipeLeftIndicator = this.flashcardElement.querySelector(".swipe-left-overlay");
-      const swipeRightIndicator = this.flashcardElement.querySelector(".swipe-right-overlay");
-
-      if (deltaX > 80) {
-        swipeRightIndicator.style.opacity = Math.min((deltaX - 80) / 100, 1);
-        swipeLeftIndicator.style.opacity = 0;
-      } else if (deltaX < -80) {
-        swipeLeftIndicator.style.opacity = Math.min((-deltaX - 80) / 100, 1);
-        swipeRightIndicator.style.opacity = 0;
+      if (quiz.countMode === "untilWrong" && !isCorrect) {
+        endQuiz();
+        return;
+      }
+      quiz.qIndex++;
+      if (quiz.qIndex >= quiz.questions.length) {
+        endQuiz();
       } else {
-        swipeLeftIndicator.style.opacity = 0;
-        swipeRightIndicator.style.opacity = 0;
+        renderQuizQuestion();
       }
-    };
+    }, 700);
+  });
+});
 
-    const handleEnd = (clientX, clientY) => {
-      if (!this.isSwiping) return;
-      this.isSwiping = false;
+function endQuiz() {
+  quiz.running = false;
+  clearInterval(quiz.timerHandle);
+  document.getElementById("quiz-question-block").classList.add("hidden");
+  document.getElementById("quiz-topbar").classList.add("hidden");
+  document.getElementById("quiz-result-block").classList.remove("hidden");
+  document.getElementById("quiz-result-score").textContent = `${quiz.correct} / ${quiz.qIndex + (quiz.correct + quiz.wrong > quiz.qIndex ? 1 : 0) || quiz.questions.length}`;
+  document.getElementById("quiz-result-score").textContent = `${quiz.correct} / ${quiz.correct + quiz.wrong}`;
+}
+function exitQuiz() {
+  quiz.running = false;
+  clearInterval(quiz.timerHandle);
+  document.getElementById("quiz-setup-panel").classList.remove("hidden");
+  document.getElementById("quiz-start-btn").classList.remove("hidden");
+  document.getElementById("quiz-topbar").classList.add("hidden");
+  document.getElementById("quiz-question-block").classList.add("hidden");
+  document.getElementById("quiz-result-block").classList.add("hidden");
+  document.getElementById("quiz-empty-state").classList.remove("hidden");
+}
+document.getElementById("quiz-exit").addEventListener("click", exitQuiz);
+document.getElementById("quiz-result-exit").addEventListener("click", exitQuiz);
+document.getElementById("quiz-restart").addEventListener("click", () => {
+  document.getElementById("quiz-start-btn").click();
+});
 
-      const deltaX = clientX - this.swipeStartX;
-      const deltaY = clientY - this.swipeStartY;
+/* ============================================================
+   TAB 4: KHO (WAREHOUSE)
+   ============================================================ */
+const wh = { cat: "flashcard" };
 
-      // Reset style overlays
-      this.flashcardElement.querySelector(".swipe-left-overlay").style.opacity = 0;
-      this.flashcardElement.querySelector(".swipe-right-overlay").style.opacity = 0;
+function whCatLabel(cat) {
+  return { flashcard: "Thẻ", writing: "Viết", dictionary: "Từ điển" }[cat];
+}
 
-      this.flashcardElement.style.transition = "transform 0.4s ease, opacity 0.4s ease";
+document.querySelectorAll("[data-wh-cat]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("[data-wh-cat]").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    wh.cat = btn.dataset.whCat;
+    renderWarehouseTab();
+  });
+});
 
-      if (deltaX > 150) {
-        // Swipe Right -> Known
-        this.markCardStatus("known");
-      } else if (deltaX < -150) {
-        // Swipe Left -> Difficult
-        this.markCardStatus("difficult");
-      } else if (deltaY < -120) {
-        // Swipe Up -> Learning
-        this.markCardStatus("learning");
-      } else {
-        // Snap back to center
-        this.flashcardElement.style.transform = "";
-      }
-    };
+function whActiveList() {
+  const lists = getCategory(wh.cat);
+  let activeId = state.activeWhList[wh.cat];
+  if (!activeId || !lists.find((l) => l.id === activeId)) {
+    activeId = lists[0] ? lists[0].id : null;
+    state.activeWhList[wh.cat] = activeId;
+  }
+  return lists.find((l) => l.id === activeId) || null;
+}
 
-    // Touch binds
-    this.flashcardElement.addEventListener("touchstart", (e) => {
-      handleStart(e.touches[0].clientX, e.touches[0].clientY);
+function renderWarehouseTab() {
+  document.getElementById("wh-lists-title").textContent = whCatLabel(wh.cat);
+  const grid = document.getElementById("wh-list-grid");
+  grid.innerHTML = "";
+  const activeList = whActiveList();
+  getCategory(wh.cat).forEach((list) => {
+    const btn = document.createElement("button");
+    btn.className = "wh-list-item" + (activeList && list.id === activeList.id ? " active" : "");
+    btn.textContent = list.name;
+    btn.addEventListener("click", () => {
+      state.activeWhList[wh.cat] = list.id;
+      saveState();
+      renderWarehouseTab();
     });
-    this.flashcardElement.addEventListener("touchmove", (e) => {
-      handleMove(e.touches[0].clientX, e.touches[0].clientY);
+    grid.appendChild(btn);
+  });
+
+  const legendMap = {
+    flashcard: ["Đang học", "Đã biết", "Khó"],
+    writing: ["Chưa làm", "Làm đúng", "Làm sai"],
+    dictionary: ["Đang học", "Đã biết", "Khó"],
+  };
+  const [l1, l2, l3] = legendMap[wh.cat];
+  document.getElementById("wh-legend-1").textContent = l1;
+  document.getElementById("wh-legend-2").textContent = l2;
+  document.getElementById("wh-legend-3").textContent = l3;
+
+  document.getElementById("wh-current-list-title").textContent = activeList ? activeList.name : "—";
+  renderWhTable();
+}
+
+let whDragSrcId = null;
+
+function renderWhTable() {
+  const table = document.getElementById("wh-table");
+  table.innerHTML = "";
+  const list = whActiveList();
+  if (!list || !list.items.length) {
+    table.innerHTML = `<div class="wh-empty-row">Chưa có mục nào trong danh sách này</div>`;
+    document.getElementById("wh-progress").textContent = "Tiến độ: 0%";
+    return;
+  }
+  list.items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "wh-row";
+    row.draggable = true;
+    row.dataset.itemId = item.id;
+    const dotClass = item.status === "known" ? "dot-known" : item.status === "difficult" ? "dot-difficult" : "dot-learning";
+    row.innerHTML = `
+      <span class="wh-row-handle" title="Kéo để sắp xếp lại">≡</span>
+      <span class="wh-row-text">
+        <span class="wh-row-en">${escapeHtml(item.en)}</span>
+        <span class="wh-row-arrow">→</span>
+        <span class="wh-row-vi">${escapeHtml(item.vi)}</span>
+      </span>
+      <span class="wh-row-dot ${dotClass}" title="${escapeHtml(statusLabel(wh.cat === "dictionary" ? "flashcard" : wh.cat, item.status))}"></span>
+      <span class="wh-row-actions">
+        <button data-act="edit" title="Sửa">✎</button>
+        <button data-act="del" title="Xoá">🗑</button>
+      </span>`;
+    row.querySelector('[data-act="edit"]').addEventListener("click", () => openWhEdit(item.id));
+    row.querySelector('[data-act="del"]').addEventListener("click", async () => {
+      const ok = await showConfirm("Xoá mục này?");
+      if (!ok) return;
+      list.items = list.items.filter((i) => i.id !== item.id);
+      saveState();
+      renderWarehouseTab();
     });
-    this.flashcardElement.addEventListener("touchend", (e) => {
-      handleEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-    });
-
-    // Mouse drag binds (enabling swipes on desktop)
-    let isMouseDown = false;
-    this.flashcardElement.addEventListener("mousedown", (e) => {
-      if (e.target.closest("button")) return;
-      isMouseDown = true;
-      handleStart(e.clientX, e.clientY);
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (!isMouseDown) return;
-      handleMove(e.clientX, e.clientY);
-    });
-    window.addEventListener("mouseup", (e) => {
-      if (!isMouseDown) return;
-      isMouseDown = false;
-      handleEnd(e.clientX, e.clientY);
-    });
-  }
-
-  // ==========================================
-  // SPEECH & AUTOPLAY CONTROLLER
-  // ==========================================
-  speakActiveFace(side) {
-    if (!this.activeCard) return;
-    
-    const isEnVi = this.selectStudyMode.value === "en-vi";
-    const speakEn = (side === "front" && isEnVi) || (side === "back" && !isEnVi);
-    
-    const text = side === "front" ? this.cardTextFront.innerText : this.cardTextBack.innerText;
-    this.tts.speak(text, speakEn ? "en" : "vi");
-  }
-
-  toggleAutoplay() {
-    this.tts.isAutoplayActive = !this.tts.isAutoplayActive;
-    
-    if (this.tts.isAutoplayActive) {
-      this.btnAutoplayToggle.classList.add("playing");
-      this.iconPlay.classList.add("hidden");
-      this.iconPause.classList.remove("hidden");
-      this.runAutoplayCycle();
-    } else {
-      this.btnAutoplayToggle.classList.remove("playing");
-      this.iconPlay.classList.remove("hidden");
-      this.iconPause.classList.add("hidden");
-      if (this.tts.autoplayTimer) clearTimeout(this.tts.autoplayTimer);
-    }
-  }
-
-  runAutoplayCycle() {
-    if (!this.tts.isAutoplayActive || !this.activeCard) return;
-
-    // Step 1: Speak front face text
-    this.speakActiveFace("front");
-
-    // Step 2: Wait delay duration, then flip card
-    this.tts.autoplayTimer = setTimeout(() => {
-      if (!this.tts.isAutoplayActive) return;
-      
-      this.flipCard();
-
-      // Step 3: Speak back face text
-      setTimeout(() => {
-        if (!this.tts.isAutoplayActive) return;
-        this.speakActiveFace("back");
-
-        // Step 4: Wait, then load next card
-        this.tts.autoplayTimer = setTimeout(() => {
-          if (!this.tts.isAutoplayActive) return;
-          
-          this.navigateDeck(1);
-          
-          // Re-trigger cycle
-          setTimeout(() => {
-            this.runAutoplayCycle();
-          }, 600); // short wait to settle visual cards loading
-        }, this.tts.autoplayDelay * 1000);
-
-      }, 1000); // Wait for card flip animation to finish before speaking back
-
-    }, this.tts.autoplayDelay * 1000);
-  }
-
-  // ==========================================
-  // PARSER MODAL & EDITING
-  // ==========================================
-  openParserModal() {
-    this.parserModal.classList.remove("hidden");
-    this.rawImportTextarea.focus();
-  }
-
-  closeParserModal() {
-    this.parserModal.classList.add("hidden");
-    this.draftCards = [];
-    this.rawImportTextarea.value = "";
-    this.previewBlock.classList.add("hidden");
-  }
-
-  executeParse() {
-    const raw = this.rawImportTextarea.value;
-    if (!raw.trim()) {
-      alert("Hãy nhập dữ liệu thô vào hộp thoại trước khi bấm Parse.");
-      return;
-    }
-
-    // Call parser engine passes current deck to flag warning duplicates
-    this.draftCards = SmartParser.parse(raw, this.deck.cards);
-
-    if (this.draftCards.length === 0) {
-      alert("Không phát hiện dữ liệu cụm từ hợp lệ. Hãy kiểm tra định dạng.");
-      return;
-    }
-
-    this.previewBlock.classList.remove("hidden");
-    this.renderPreviewTable();
-    this.rawImportTextarea.blur();
-  }
-
-  renderPreviewTable() {
-    this.previewTableBody.innerHTML = "";
-    
-    // Apply filters inside preview
-    const query = this.previewSearchInput.value.toLowerCase();
-    const confFilter = this.previewConfidenceFilter.value;
-
-    const filtered = this.draftCards.filter(c => {
-      const matchSearch = c.english.toLowerCase().includes(query) || 
-                          c.vietnamese.toLowerCase().includes(query);
-      const matchConf = confFilter === "all" || c.confidence === confFilter;
-      return matchSearch && matchConf;
+    row.querySelector(".wh-row-dot").addEventListener("click", () => {
+      const order = ["new", "known", "difficult"];
+      item.status = order[(order.indexOf(item.status) + 1) % order.length];
+      saveState();
+      renderWhTable();
     });
 
-    this.previewCount.innerText = filtered.length;
-    this.checkSelectAllPreview.checked = false;
-
-    if (filtered.length === 0) {
-      this.previewTableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Không tìm thấy bản ghi nháp nào khớp.</td></tr>`;
-      this.duplicateWarningBanner.classList.add("hidden");
-      return;
-    }
-
-    // Check duplicate counts
-    const duplicatesCount = filtered.filter(c => c.duplicateWarning).length;
-    if (duplicatesCount > 0) {
-      this.duplicateWarningBanner.classList.remove("hidden");
-      this.duplicateWarningText.innerText = `Phát hiện ${duplicatesCount} thẻ có khả năng trùng với từ vựng hiện có (Độ khớp > 80%).`;
-    } else {
-      this.duplicateWarningBanner.classList.add("hidden");
-    }
-
-    filtered.forEach((card, index) => {
-      const row = document.createElement("tr");
-      row.className = card.confidence === "low" ? "row-low-confidence draggable-row" : "draggable-row";
-      row.draggable = true;
-      row.dataset.id = card.id;
-
-      // Badges classes
-      let confBadge = `<span class="badge badge-success">High</span>`;
-      if (card.confidence === "medium") confBadge = `<span class="badge badge-warning">Medium</span>`;
-      if (card.confidence === "low") {
-        confBadge = card.duplicateWarning 
-          ? `<span class="badge badge-danger" title="Duplicate warning">Duplicate?</span>`
-          : `<span class="badge badge-danger">Low</span>`;
-      }
-
-      row.innerHTML = `
-        <td><input type="checkbox" data-id="${card.id}"></td>
-        <td>${confBadge}</td>
-        <td class="editable-cell text-english-cell" contenteditable="true" data-field="english" data-id="${card.id}">${card.english}</td>
-        <td class="editable-cell text-vietnamese-cell" contenteditable="true" data-field="vietnamese" data-id="${card.id}">${card.vietnamese}</td>
-        <td>
-          <div style="display: flex; gap: 4px;">
-            <button class="action-btn-secondary btn-row-split" data-id="${card.id}" title="Split phrase" style="padding: 4px 6px;">Split</button>
-            <button class="action-btn-secondary btn-row-merge" data-id="${card.id}" title="Merge with below" style="padding: 4px 6px;">Merge</button>
-            <button class="danger-btn btn-row-delete" data-id="${card.id}" title="Delete" style="padding: 4px 6px;">&times;</button>
-          </div>
-        </td>
-      `;
-
-      // Set up inline editing saves
-      const engCell = row.querySelector("[data-field='english']");
-      const viCell = row.querySelector("[data-field='vietnamese']");
-
-      const handleCellBlur = (e, field) => {
-        const text = e.target.innerText.trim();
-        const cid = e.target.dataset.id;
-        const dCard = this.draftCards.find(c => c.id === cid);
-        if (dCard) {
-          dCard[field] = text;
-        }
-      };
-
-      engCell.addEventListener("blur", (e) => handleCellBlur(e, "english"));
-      viCell.addEventListener("blur", (e) => handleCellBlur(e, "vietnamese"));
-
-      // Set up row inline button triggers
-      row.querySelector(".btn-row-split").addEventListener("click", () => this.splitCardRow(card.id));
-      row.querySelector(".btn-row-merge").addEventListener("click", () => this.mergeCardRow(card.id));
-      row.querySelector(".btn-row-delete").addEventListener("click", () => this.deleteDraftCard(card.id));
-
-      // Setup Drag & Drop handlers
-      this.setupRowDragAndDrop(row);
-
-      this.previewTableBody.appendChild(row);
-    });
-  }
-
-  // Row operations inside preview editor
-  deleteDraftCard(id) {
-    this.draftCards = this.draftCards.filter(c => c.id !== id);
-    this.renderPreviewTable();
-  }
-
-  splitCardRow(id) {
-    const idx = this.draftCards.findIndex(c => c.id === id);
-    if (idx === -1) return;
-    
-    const target = this.draftCards[idx];
-    
-    // Prompt split text index
-    const splitText = prompt("Nhập từ/cụm từ phân chia hoặc vị trí cắt. Ví dụ, chia tiếng Anh thành hai:");
-    if (!splitText) return;
-
-    if (target.english.includes(splitText)) {
-      const parts = target.english.split(splitText);
-      const part1 = parts[0].trim();
-      const part2 = (splitText + (parts[1] || "")).trim();
-
-      target.english = part1;
-      
-      const newCard = {
-        ...target,
-        id: `draft_${Date.now()}_split_${Math.random()}`,
-        english: part2,
-        confidence: "medium"
-      };
-
-      this.draftCards.splice(idx + 1, 0, newCard);
-      this.renderPreviewTable();
-    } else {
-      alert("Không tìm thấy từ phân chia trong ô tiếng Anh.");
-    }
-  }
-
-  mergeCardRow(id) {
-    const idx = this.draftCards.findIndex(c => c.id === id);
-    if (idx === -1 || idx === this.draftCards.length - 1) {
-      alert("Không có hàng bên dưới để gộp.");
-      return;
-    }
-
-    const current = this.draftCards[idx];
-    const next = this.draftCards[idx + 1];
-
-    current.english = `${current.english} / ${next.english}`.trim();
-    current.vietnamese = `${current.vietnamese} / ${next.vietnamese}`.trim();
-    current.confidence = "medium";
-
-    // Remove next card
-    this.draftCards.splice(idx + 1, 1);
-    this.renderPreviewTable();
-  }
-
-  // HTML5 Drag and Drop reordering
-  setupRowDragAndDrop(row) {
+    /* ---- drag & drop reordering ---- */
     row.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/plain", row.dataset.id);
+      whDragSrcId = item.id;
       row.classList.add("dragging");
-    });
-
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      const draggingRow = this.previewTableBody.querySelector(".dragging");
-      const targetRow = e.target.closest("tr");
-      if (draggingRow && targetRow && targetRow !== draggingRow) {
-        const bounding = targetRow.getBoundingClientRect();
-        const offset = e.clientY - bounding.top - bounding.height / 2;
-        if (offset > 0) {
-          this.previewTableBody.insertBefore(draggingRow, targetRow.nextSibling);
-        } else {
-          this.previewTableBody.insertBefore(draggingRow, targetRow);
-        }
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", item.id); } catch (err) { /* ignore */ }
       }
     });
-
     row.addEventListener("dragend", () => {
       row.classList.remove("dragging");
-      this.syncDraggedOrder();
+      table.querySelectorAll(".wh-row").forEach((r) => r.classList.remove("drag-over-top", "drag-over-bottom"));
+      whDragSrcId = null;
     });
-  }
-
-  syncDraggedOrder() {
-    // Read the current DOM rows order and reorder draftCards array accordingly
-    const domRows = Array.from(this.previewTableBody.querySelectorAll("tr"));
-    const reorderedDrafts = [];
-
-    domRows.forEach(row => {
-      const cid = row.dataset.id;
-      const card = this.draftCards.find(c => c.id === cid);
-      if (card) {
-        reorderedDrafts.push(card);
-      }
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      if (!whDragSrcId || whDragSrcId === item.id) return;
+      const rect = row.getBoundingClientRect();
+      const isAfter = e.clientY - rect.top > rect.height / 2;
+      row.classList.toggle("drag-over-bottom", isAfter);
+      row.classList.toggle("drag-over-top", !isAfter);
     });
-
-    this.draftCards = reorderedDrafts;
-  }
-
-  // Bulk actions
-  handleBulkDelete() {
-    const selectedCheckboxes = this.previewTableBody.querySelectorAll("input[type='checkbox']:checked");
-    if (selectedCheckboxes.length === 0) {
-      alert("Hãy chọn các thẻ muốn xóa hàng loạt.");
-      return;
-    }
-
-    if (confirm(`Bạn có chắc chắn muốn xóa ${selectedCheckboxes.length} thẻ nháp đã chọn?`)) {
-      const idsToDelete = Array.from(selectedCheckboxes).map(cb => cb.dataset.id);
-      this.draftCards = this.draftCards.filter(c => !idsToDelete.includes(c.id));
-      this.renderPreviewTable();
-    }
-  }
-
-  resolveDuplicatesMerge() {
-    // Auto merge or skip duplicates flagged in preview
-    this.draftCards.forEach(c => {
-      if (c.duplicateWarning && c.duplicateCardId) {
-        const existing = this.deck.cards.find(ec => ec.id === c.duplicateCardId);
-        if (existing) {
-          // Append Vietnamese translations together if they are different
-          if (!existing.vietnamese.toLowerCase().includes(c.vietnamese.toLowerCase())) {
-            existing.vietnamese = `${existing.vietnamese} / ${c.vietnamese}`;
-          }
-          // Mark draft card for exclusion by emptying it
-          c.english = "";
-          c.vietnamese = "";
-        }
-      }
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("drag-over-top", "drag-over-bottom");
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const isAfter = row.classList.contains("drag-over-bottom");
+      row.classList.remove("drag-over-top", "drag-over-bottom");
+      if (!whDragSrcId || whDragSrcId === item.id) return;
+      const fromIdx = list.items.findIndex((i) => i.id === whDragSrcId);
+      let toIdx = list.items.findIndex((i) => i.id === item.id);
+      if (fromIdx === -1 || toIdx === -1) return;
+      const [moved] = list.items.splice(fromIdx, 1);
+      toIdx = list.items.findIndex((i) => i.id === item.id);
+      list.items.splice(isAfter ? toIdx + 1 : toIdx, 0, moved);
+      saveState();
+      renderWhTable();
     });
 
-    // Remove empty cards
-    this.draftCards = this.draftCards.filter(c => c.english.trim() && c.vietnamese.trim());
-    this.deck.saveToStorage();
-    this.renderPreviewTable();
-    alert("Đã gộp nghĩa các thẻ trùng lặp vào bộ nhớ. Các ô trùng trong nháp đã bị xóa.");
-  }
-
-  acceptImport() {
-    // Validate final checks
-    const finalToImport = this.draftCards.filter(c => c.english.trim() || c.vietnamese.trim());
-    if (finalToImport.length === 0) {
-      alert("Không có thẻ nào hợp lệ để thêm vào bộ nhớ.");
-      return;
-    }
-
-    const count = this.deck.importCards(finalToImport);
-    this.closeParserModal();
-    this.renderStats();
-    this.loadNewCard();
-    alert(`Đã thêm thành công ${count} thẻ vào bộ học của bạn!`);
-  }
-
-  // ==========================================
-  // IMPORT & EXPORT DRAWER LOGIC
-  // ==========================================
-  openExportModal() {
-    this.exportModal.classList.remove("hidden");
-    
-    // Put txt preview inside textarea by default
-    const txtContent = this.deck.cards.map(c => `${c.english} • ${c.vietnamese}`).join("\n");
-    this.exportTextareaCopy.value = txtContent;
-  }
-
-  closeExportModal() {
-    this.exportModal.classList.add("hidden");
-    this.exportTextareaCopy.value = "";
-  }
-
-  copyExportToClipboard() {
-    this.exportTextareaCopy.select();
-    document.execCommand("copy");
-    alert("Đã sao chép toàn bộ dữ liệu từ vựng vào clipboard!");
-  }
-
-  exportDeck(format) {
-    if (this.deck.cards.length === 0) {
-      alert("Thư mục thẻ trống, không thể xuất.");
-      return;
-    }
-
-    let content = "";
-    let mime = "text/plain";
-    let filename = `aethervocab_export_${Date.now()}`;
-
-    if (format === "json") {
-      content = JSON.stringify(this.deck.cards, null, 2);
-      mime = "application/json";
-      filename += ".json";
-    } else if (format === "csv") {
-      const headers = "id,english,vietnamese,status,confidence,createdAt,lastReviewed,reviewCount,correctCount,incorrectCount\n";
-      const rows = this.deck.cards.map(c => {
-        // Escape quotes
-        const escapeStr = (s) => `"${String(s).replace(/"/g, '""')}"`;
-        return `${c.id},${escapeStr(c.english)},${escapeStr(c.vietnamese)},${c.status},${c.confidence},${c.createdAt},${c.lastReviewed},${c.reviewCount},${c.correctCount},${c.incorrectCount}`;
-      }).join("\n");
-      content = headers + rows;
-      mime = "text/csv";
-      filename += ".csv";
-    } else {
-      // txt format
-      content = this.deck.cards.map(c => `${c.english} • ${c.vietnamese}`).join("\n");
-      filename += ".txt";
-    }
-
-    const blob = new Blob([content], { type: `${mime};charset=utf-8;` });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
-
-  exportStatsReport() {
-    const stats = this.deck.getStats();
-    
-    // Create detailed HTML report
-    const htmlReport = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>AetherVocab Study Statistics</title>
-        <style>
-          body { font-family: sans-serif; padding: 40px; color: #334155; line-height: 1.6; }
-          .container { max-width: 600px; margin: 0 auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 30px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-          h1 { color: #6366f1; margin-bottom: 5px; }
-          h2 { border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 30px; }
-          .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }
-          .stat-card { background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; }
-          .num { font-size: 24px; font-weight: bold; color: #0f172a; }
-          .label { font-size: 12px; color: #64748b; text-transform: uppercase; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>Báo Cáo Tiến Trình Học Tập</h1>
-          <p>Xuất bản lúc: ${new Date().toLocaleString()}</p>
-          <div class="stat-grid">
-            <div class="stat-card"><div class="num">${this.deck.streak} ngày</div><div class="label">Streak Hiện Tại</div></div>
-            <div class="stat-card"><div class="num">${stats.progressPercent}%</div><div class="label">Tiến Độ Thuộc Từ</div></div>
-            <div class="stat-card"><div class="num">${stats.total}</div><div class="label">Tổng Số Thẻ</div></div>
-            <div class="stat-card"><div class="num">${stats.known}</div><div class="label">Đã Thuộc (Known)</div></div>
-            <div class="stat-card"><div class="num">${stats.learning}</div><div class="label">Đang Học (Learning)</div></div>
-            <div class="stat-card"><div class="num">${stats.difficult}</div><div class="label">Từ Khó (Difficult)</div></div>
-          </div>
-          <h2>Review Thống Kê Phiên Này</h2>
-          <ul>
-            <li>Thời gian tích lũy phiên học này: ${this.deck.getFormattedTime()}</li>
-            <li>Tổng số lượt trả lời: ${this.deck.sessionReviews}</li>
-            <li>Độ chính xác: ${this.deck.sessionReviews > 0 ? Math.round((this.deck.sessionCorrect / this.deck.sessionReviews) * 100) : 0}%</li>
-          </ul>
-        </div>
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob([htmlReport], { type: "text/html;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `aethervocab_report_${Date.now()}.html`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
-
-  handleFileImport(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      const extension = file.name.split('.').pop().toLowerCase();
-
-      try {
-        let cardsToImport = [];
-
-        if (extension === "json") {
-          cardsToImport = JSON.parse(text);
-          if (!Array.isArray(cardsToImport)) throw new Error("JSON must be an array of card objects");
-        } else if (extension === "csv") {
-          // Simplistic CSV parser
-          const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-          if (lines.length > 1) {
-            // Check headers, skip first line if it looks like headers
-            let startIdx = 0;
-            if (lines[0].toLowerCase().includes("english") || lines[0].toLowerCase().includes("vietnamese")) {
-              startIdx = 1;
-            }
-
-            for (let i = startIdx; i < lines.length; i++) {
-              // regex splits csv values handling quotes
-              const cols = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(",");
-              if (cols.length >= 2) {
-                const cleanCell = (c) => c.replace(/^"|"$/g, '').trim();
-                cardsToImport.push({
-                  english: cleanCell(cols[1] || cols[0]),
-                  vietnamese: cleanCell(cols[2] || cols[1] || ""),
-                  status: cleanCell(cols[3] || "learning"),
-                  confidence: cleanCell(cols[4] || "high"),
-                  createdAt: parseInt(cols[5]) || Date.now(),
-                  lastReviewed: parseInt(cols[6]) || 0,
-                  reviewCount: parseInt(cols[7]) || 0,
-                  correctCount: parseInt(cols[8]) || 0,
-                  incorrectCount: parseInt(cols[9]) || 0
-                });
-              }
-            }
-          }
-        } else {
-          // TXT file import -> Parse it via parser
-          cardsToImport = SmartParser.parse(text, this.deck.cards);
-        }
-
-        if (cardsToImport.length === 0) {
-          alert("Không tìm thấy dữ liệu thẻ hợp lệ trong tệp tin.");
-          return;
-        }
-
-        const count = this.deck.importCards(cardsToImport);
-        this.renderStats();
-        this.loadNewCard();
-        alert(`Đã nhập thành công ${count} thẻ từ tệp tin!`);
-
-      } catch (err) {
-        alert("Lỗi định dạng tệp tin: Không thể xử lý dữ liệu. Chi tiết: " + err.message);
-      }
-    };
-    reader.readAsText(file);
-    // Clear input
-    this.fileInputHidden.value = "";
-  }
-
-  // ==========================================
-  // ACCESSIBILITY & SHUTTLE ANIMATIONS
-  // ==========================================
-  triggerCardShuffleEffect() {
-    this.flashcardElement.style.transition = "none";
-    this.flashcardElement.style.transform = "scale(0.8) rotate(-10deg)";
-    this.flashcardElement.style.opacity = "0.5";
-    
-    setTimeout(() => {
-      this.flashcardElement.style.transition = "transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s";
-      this.flashcardElement.style.transform = "";
-      this.flashcardElement.style.opacity = "1";
-    }, 100);
-  }
-
-  handleKeyboardShortcuts(event) {
-    const key = event.key.toLowerCase();
-
-    // 1. Capture keys during active Quiz session
-    if (this.quizContainer && !this.quizContainer.classList.contains("hidden")) {
-      if (!this.quizActiveScreen.classList.contains("hidden")) {
-        // If feedback correct/incorrect banner is visible, Space or Enter triggers Next
-        if (!this.quizFeedbackBlock.classList.contains("hidden")) {
-          if (event.code === "Space" || key === " " || key === "enter") {
-            event.preventDefault();
-            this.btnQuizFeedbackNext.click();
-            return;
-          }
-        }
-        // If typing input is focused, let Enter submit (handled natively via submit button binding)
-        if (document.activeElement === this.quizTypingInput) {
-          return;
-        }
-        // If multiple choice grid is active, keys 1/2/3/4 select choices
-        if (!this.quizChoiceGrid.classList.contains("hidden") && this.quizFeedbackBlock.classList.contains("hidden")) {
-          if (["1", "2", "3", "4"].includes(key)) {
-            event.preventDefault();
-            const buttons = this.quizChoiceGrid.querySelectorAll(".choice-btn");
-            const idx = parseInt(key) - 1;
-            if (buttons[idx] && buttons[idx].style.display !== "none") {
-              buttons[idx].click();
-            }
-            return;
-          }
-          if (key === "s") {
-            event.preventDefault();
-            this.btnQuizListeningSpeak.click();
-            return;
-          }
-        }
-      }
-      return; // Do not fall through to study shortcuts when in quiz tab
-    }
-
-    // 2. Fallback: Avoid capturing keyboard shortcuts if typing in input fields
-    if (document.activeElement.tagName === "INPUT" || 
-        document.activeElement.tagName === "TEXTAREA" ||
-        document.activeElement.getAttribute("contenteditable") === "true") {
-      return;
-    }
-
-    if (event.code === "Space" || key === " ") {
-      event.preventDefault();
-      this.flipCard();
-    } else if (key === "arrowleft") {
-      this.navigateDeck(-1);
-    } else if (key === "arrowright") {
-      this.navigateDeck(1);
-    } else if (key === "d") {
-      this.markCardStatus("difficult");
-    } else if (key === "l") {
-      this.markCardStatus("learning");
-    } else if (key === "k") {
-      this.markCardStatus("known");
-    } else if (key === "s") {
-      this.speakActiveFace(this.isCardFlipped ? "back" : "front");
-    } else if (key === "r") {
-      this.actionShuffle.click();
-    } else if (key === "t") {
-      this.themeToggleBtn.click();
-    }
-  }
+    table.appendChild(row);
+  });
+  const known = list.items.filter((i) => i.status === "known").length;
+  const pct = Math.round((known / list.items.length) * 100);
+  document.getElementById("wh-progress").textContent = `Tiến độ: ${pct}%`;
 }
 
-// Initialize Application UI
-window.addEventListener("DOMContentLoaded", () => {
-  window.app = new UIController();
+async function addWhList() {
+  const name = await showPrompt("Tên danh sách mới", "Danh sách " + (getCategory(wh.cat).length + 1));
+  if (!name) return;
+  const list = defaultList(name);
+  getCategory(wh.cat).push(list);
+  state.activeWhList[wh.cat] = list.id;
+  saveState();
+  renderWarehouseTab();
+}
+document.getElementById("wh-add-list").addEventListener("click", addWhList);
+
+document.getElementById("wh-rename-list").addEventListener("click", async () => {
+  const list = whActiveList();
+  if (!list) return;
+  const name = await showPrompt("Đổi tên danh sách", list.name);
+  if (!name) return;
+  list.name = name;
+  saveState();
+  renderWarehouseTab();
 });
+document.getElementById("wh-delete-list").addEventListener("click", async () => {
+  const list = whActiveList();
+  if (!list) return;
+  const lists = getCategory(wh.cat);
+  if (lists.length <= 1) {
+    showToast("Phải có ít nhất một danh sách.");
+    return;
+  }
+  const ok = await showConfirm(`Xoá danh sách "${list.name}"? Toàn bộ mục bên trong sẽ mất.`);
+  if (!ok) return;
+  state.categories[wh.cat] = lists.filter((l) => l.id !== list.id);
+  state.activeWhList[wh.cat] = null;
+  state.selected.flashcard = state.selected.flashcard.filter((id) => id !== list.id);
+  state.selected.writing = state.selected.writing.filter((id) => id !== list.id);
+  saveState();
+  renderWarehouseTab();
+});
+document.getElementById("wh-clear-all").addEventListener("click", async () => {
+  const list = whActiveList();
+  if (!list || !list.items.length) return;
+  const ok = await showConfirm("Xoá toàn bộ mục trong danh sách này?");
+  if (!ok) return;
+  list.items = [];
+  saveState();
+  renderWarehouseTab();
+});
+document.getElementById("wh-reset-status").addEventListener("click", () => {
+  const list = whActiveList();
+  if (!list) return;
+  list.items.forEach((i) => (i.status = "new"));
+  saveState();
+  renderWarehouseTab();
+});
+
+/* ---- Thêm vào (bulk add) modal ---- */
+const whAddOverlay = document.getElementById("wh-add-overlay");
+document.getElementById("wh-add-items").addEventListener("click", () => {
+  const list = whActiveList();
+  if (!list) return;
+  document.getElementById("wh-add-list-name").textContent = "— " + list.name;
+  document.getElementById("wh-add-textarea").value = "";
+  whAddOverlay.classList.remove("hidden");
+});
+document.getElementById("wh-add-close").addEventListener("click", () => whAddOverlay.classList.add("hidden"));
+whAddOverlay.addEventListener("click", (e) => { if (e.target === whAddOverlay) whAddOverlay.classList.add("hidden"); });
+document.getElementById("wh-add-clear").addEventListener("click", () => {
+  document.getElementById("wh-add-textarea").value = "";
+});
+document.getElementById("wh-add-confirm").addEventListener("click", () => {
+  const list = whActiveList();
+  if (!list) return;
+  const raw = document.getElementById("wh-add-textarea").value;
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  let added = 0;
+  lines.forEach((line) => {
+    const sep = line.includes("-->") ? "-->" : line.includes("\t") ? "\t" : "-";
+    const idx = line.indexOf(sep);
+    if (idx === -1) return;
+    const en = line.slice(0, idx).trim();
+    const vi = line.slice(idx + sep.length).trim();
+    if (!en || !vi) return;
+    list.items.push({ id: uid(), en, vi, status: "new" });
+    added++;
+  });
+  saveState();
+  whAddOverlay.classList.add("hidden");
+  renderWarehouseTab();
+  if (!added) showToast('Không nhận diện được dòng nào. Dùng định dạng: "Câu Tiếng Anh - Câu Tiếng Việt" mỗi dòng.');
+  else showToast(`Đã thêm ${added} mục.`);
+});
+
+/* ---- Edit item modal ---- */
+const whEditOverlay = document.getElementById("wh-edit-overlay");
+let whEditItemId = null;
+function openWhEdit(itemId) {
+  const list = whActiveList();
+  const item = list.items.find((i) => i.id === itemId);
+  if (!item) return;
+  whEditItemId = itemId;
+  document.getElementById("wh-edit-en").value = item.en;
+  document.getElementById("wh-edit-vi").value = item.vi;
+  whEditOverlay.classList.remove("hidden");
+}
+document.getElementById("wh-edit-close").addEventListener("click", () => whEditOverlay.classList.add("hidden"));
+whEditOverlay.addEventListener("click", (e) => { if (e.target === whEditOverlay) whEditOverlay.classList.add("hidden"); });
+document.getElementById("wh-edit-save").addEventListener("click", () => {
+  const list = whActiveList();
+  const item = list.items.find((i) => i.id === whEditItemId);
+  if (!item) return;
+  item.en = document.getElementById("wh-edit-en").value.trim();
+  item.vi = document.getElementById("wh-edit-vi").value.trim();
+  saveState();
+  whEditOverlay.classList.add("hidden");
+  renderWarehouseTab();
+});
+
+/* ---- Export / Import modal ---- */
+const whExportOverlay = document.getElementById("wh-export-overlay");
+document.getElementById("wh-export-open").addEventListener("click", () => whExportOverlay.classList.remove("hidden"));
+document.getElementById("wh-export-close").addEventListener("click", () => whExportOverlay.classList.add("hidden"));
+whExportOverlay.addEventListener("click", (e) => { if (e.target === whExportOverlay) whExportOverlay.classList.add("hidden"); });
+
+function getExportScope() {
+  return document.querySelector('input[name="wh-export-scope"]:checked').value;
+}
+function exportData() {
+  const scope = getExportScope();
+  if (scope === "current") {
+    const list = whActiveList();
+    return list ? [list] : [];
+  }
+  return getCategory(wh.cat);
+}
+function download(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+document.getElementById("wh-export-json").addEventListener("click", () => {
+  download(`nox-${wh.cat}.json`, JSON.stringify(exportData(), null, 2), "application/json");
+});
+document.getElementById("wh-export-txt").addEventListener("click", () => {
+  const lists = exportData();
+  let txt = "";
+  lists.forEach((l) => {
+    txt += `# ${l.name}\n`;
+    l.items.forEach((i) => (txt += `${i.en} - ${i.vi}\n`));
+    txt += "\n";
+  });
+  download(`nox-${wh.cat}.txt`, txt, "text/plain");
+});
+document.getElementById("wh-export-copy").addEventListener("click", () => {
+  const lists = exportData();
+  let txt = "";
+  lists.forEach((l) => {
+    txt += `# ${l.name}\n`;
+    l.items.forEach((i) => (txt += `${i.en} - ${i.vi}\n`));
+    txt += "\n";
+  });
+  navigator.clipboard.writeText(txt).then(() => showToast("Đã sao chép vào clipboard!"));
+});
+document.getElementById("wh-import-btn").addEventListener("click", () => {
+  document.getElementById("wh-import-file").click();
+});
+document.getElementById("wh-import-file").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      if (file.name.endsWith(".json")) {
+        const data = JSON.parse(reader.result);
+        const lists = Array.isArray(data) ? data : [data];
+        lists.forEach((l) => {
+          const newList = defaultList(l.name || "Danh sách nhập");
+          (l.items || []).forEach((i) => newList.items.push({ id: uid(), en: i.en, vi: i.vi, status: "new" }));
+          getCategory(wh.cat).push(newList);
+        });
+      } else {
+        const list = whActiveList() || (() => { addWhList(); return whActiveList(); })();
+        reader.result.split("\n").forEach((line) => {
+          line = line.trim();
+          if (!line || line.startsWith("#")) return;
+          const sep = line.includes("-->") ? "-->" : line.includes("\t") ? "\t" : "-";
+          const idx = line.indexOf(sep);
+          if (idx === -1) return;
+          const en = line.slice(0, idx).trim();
+          const vi = line.slice(idx + sep.length).trim();
+          if (en && vi) list.items.push({ id: uid(), en, vi, status: "new" });
+        });
+      }
+      saveState();
+      renderWarehouseTab();
+      whExportOverlay.classList.add("hidden");
+      showToast("Nhập file thành công!");
+    } catch (err) {
+      showToast("Không đọc được file: " + err.message);
+    }
+    e.target.value = "";
+  };
+  reader.readAsText(file);
+});
+
+/* ============================================================
+   INIT
+   ============================================================ */
+ensureSelected("flashcard");
+ensureSelected("writing");
+renderFlashcardTab();
+saveState();
