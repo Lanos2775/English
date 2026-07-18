@@ -11,6 +11,9 @@ function uid() {
 function defaultList(name) {
   return { id: uid(), name, items: [] };
 }
+function defaultDiaryList(name) {
+  return { id: uid(), name, content: "" };
+}
 
 function defaultState() {
   return {
@@ -19,9 +22,10 @@ function defaultState() {
       flashcard: [defaultList("Danh sách 1")],
       writing: [defaultList("Danh sách 1")],
       dictionary: [defaultList("Danh sách 1")],
+      diary: [defaultDiaryList("Nhật ký 1")],
     },
     selected: { flashcard: [], writing: [] },
-    activeWhList: { flashcard: null, writing: null, dictionary: null },
+    activeWhList: { flashcard: null, writing: null, dictionary: null, diary: null },
   };
 }
 
@@ -33,7 +37,11 @@ function loadState() {
     // basic shape guard
     if (!parsed.categories) return defaultState();
     if (!parsed.selected) parsed.selected = { flashcard: [], writing: [] };
-    if (!parsed.activeWhList) parsed.activeWhList = { flashcard: null, writing: null, dictionary: null };
+    if (!parsed.activeWhList) parsed.activeWhList = { flashcard: null, writing: null, dictionary: null, diary: null };
+    if (!parsed.categories.diary || !parsed.categories.diary.length) {
+      parsed.categories.diary = [defaultDiaryList("Nhật ký 1")];
+    }
+    if (!("diary" in parsed.activeWhList)) parsed.activeWhList.diary = null;
     if (!parsed.themeLevel) {
       // migrate from old light/dark boolean theme if present
       parsed.themeLevel = parsed.theme === "dark" ? 4 : 1;
@@ -1102,7 +1110,7 @@ document.getElementById("quiz-restart").addEventListener("click", () => {
 const wh = { cat: "flashcard" };
 
 function whCatLabel(cat) {
-  return { flashcard: "Thẻ", writing: "Viết", dictionary: "Từ điển" }[cat];
+  return { flashcard: "Thẻ", writing: "Viết", dictionary: "Từ điển", diary: "Nhật Ký" }[cat];
 }
 
 document.querySelectorAll("[data-wh-cat]").forEach((btn) => {
@@ -1141,18 +1149,40 @@ function renderWarehouseTab() {
     grid.appendChild(btn);
   });
 
-  const legendMap = {
-    flashcard: ["Đang học", "Đã biết", "Khó"],
-    writing: ["Chưa làm", "Làm đúng", "Làm sai"],
-    dictionary: ["Đang học", "Đã biết", "Khó"],
-  };
-  const [l1, l2, l3] = legendMap[wh.cat];
-  document.getElementById("wh-legend-1").textContent = l1;
-  document.getElementById("wh-legend-2").textContent = l2;
-  document.getElementById("wh-legend-3").textContent = l3;
+  const isDiary = wh.cat === "diary";
+  document.getElementById("wh-table-wrap").classList.toggle("hidden", isDiary);
+  document.getElementById("wh-diary-preview").classList.toggle("hidden", !isDiary);
+  document.getElementById("wh-toolbar").classList.toggle("hidden", isDiary);
+  document.getElementById("wh-legend").classList.toggle("hidden", isDiary);
+
+  if (!isDiary) {
+    const legendMap = {
+      flashcard: ["Đang học", "Đã biết", "Khó"],
+      writing: ["Chưa làm", "Làm đúng", "Làm sai"],
+      dictionary: ["Đang học", "Đã biết", "Khó"],
+    };
+    const [l1, l2, l3] = legendMap[wh.cat];
+    document.getElementById("wh-legend-1").textContent = l1;
+    document.getElementById("wh-legend-2").textContent = l2;
+    document.getElementById("wh-legend-3").textContent = l3;
+  }
 
   document.getElementById("wh-current-list-title").textContent = activeList ? activeList.name : "—";
-  renderWhTable();
+  if (isDiary) {
+    renderDiaryPreview();
+  } else {
+    renderWhTable();
+  }
+}
+
+function renderDiaryPreview() {
+  const list = whActiveList();
+  const box = document.getElementById("wh-diary-preview-content");
+  if (!list || !list.content || !list.content.trim()) {
+    box.innerHTML = `<p class="wh-diary-empty">Chưa có nội dung. Nhấn "Mở để viết" để bắt đầu ghi chép.</p>`;
+  } else {
+    box.innerHTML = list.content;
+  }
 }
 
 let whDragSrcId = null;
@@ -1248,9 +1278,10 @@ function renderWhTable() {
 }
 
 async function addWhList() {
-  const name = await showPrompt("Tên danh sách mới", "Danh sách " + (getCategory(wh.cat).length + 1));
+  const defaultName = wh.cat === "diary" ? "Nhật ký " + (getCategory(wh.cat).length + 1) : "Danh sách " + (getCategory(wh.cat).length + 1);
+  const name = await showPrompt("Tên danh sách mới", defaultName);
   if (!name) return;
-  const list = defaultList(name);
+  const list = wh.cat === "diary" ? defaultDiaryList(name) : defaultList(name);
   getCategory(wh.cat).push(list);
   state.activeWhList[wh.cat] = list.id;
   saveState();
@@ -1499,6 +1530,226 @@ document.getElementById("wh-import-file").addEventListener("change", (e) => {
     e.target.value = "";
   };
   reader.readAsText(file);
+});
+
+/* ============================================================
+   NHẬT KÝ (DIARY) — quick popup rich-text editor
+   ============================================================ */
+let diaryCurrentListId = null;
+let diaryAutosaveHandle = null;
+
+function diaryActiveList() {
+  const lists = getCategory("diary");
+  let activeId = state.activeWhList.diary;
+  if (!activeId || !lists.find((l) => l.id === activeId)) {
+    activeId = lists[0] ? lists[0].id : null;
+    state.activeWhList.diary = activeId;
+  }
+  return lists.find((l) => l.id === activeId) || null;
+}
+
+function renderDiaryNoteSelect() {
+  const select = document.getElementById("dy-note-select");
+  select.innerHTML = "";
+  getCategory("diary").forEach((l) => {
+    const opt = document.createElement("option");
+    opt.value = l.id;
+    opt.textContent = l.name;
+    if (l.id === diaryCurrentListId) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function openDiaryPopup(listId) {
+  let target = listId ? getCategory("diary").find((l) => l.id === listId) : diaryActiveList();
+  if (!target) {
+    target = defaultDiaryList("Nhật ký 1");
+    getCategory("diary").push(target);
+  }
+  diaryCurrentListId = target.id;
+  state.activeWhList.diary = target.id;
+  saveState();
+
+  const content = document.getElementById("dy-content");
+  content.innerHTML = target.content || "";
+  content.contentEditable = "true";
+  document.getElementById("dy-mode-btn").classList.remove("active-state");
+  closeAllDiaryDropdowns();
+  renderDiaryNoteSelect();
+  document.getElementById("diary-popup-overlay").classList.remove("hidden");
+  setTimeout(() => content.focus(), 60);
+}
+
+function saveDiaryContent() {
+  if (!diaryCurrentListId) return;
+  const list = getCategory("diary").find((l) => l.id === diaryCurrentListId);
+  if (!list) return;
+  list.content = document.getElementById("dy-content").innerHTML;
+  saveState();
+}
+
+function closeDiaryPopup() {
+  saveDiaryContent();
+  closeAllDiaryDropdowns();
+  document.getElementById("diary-popup-overlay").classList.add("hidden");
+  const whTab = document.querySelector('.tab-content[data-content="warehouse"]');
+  if (whTab && !whTab.classList.contains("hidden") && wh.cat === "diary") {
+    renderWarehouseTab();
+  }
+}
+
+function scheduleDiaryAutosave() {
+  clearTimeout(diaryAutosaveHandle);
+  diaryAutosaveHandle = setTimeout(saveDiaryContent, 800);
+}
+
+document.getElementById("diary-quick-open").addEventListener("click", () => openDiaryPopup());
+document.getElementById("wh-diary-open-editor").addEventListener("click", () => {
+  const list = whActiveList();
+  openDiaryPopup(list ? list.id : null);
+});
+document.getElementById("dy-close-btn").addEventListener("click", closeDiaryPopup);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("diary-popup-overlay").classList.contains("hidden")) {
+    closeDiaryPopup();
+  }
+});
+window.addEventListener("beforeunload", () => {
+  if (!document.getElementById("diary-popup-overlay").classList.contains("hidden")) {
+    saveDiaryContent();
+  }
+});
+// NOTE: clicking the backdrop intentionally does NOT close this popup (per request),
+// unlike the other overlays in the app.
+
+document.getElementById("dy-note-select").addEventListener("change", (e) => {
+  saveDiaryContent();
+  const list = getCategory("diary").find((l) => l.id === e.target.value);
+  if (!list) return;
+  diaryCurrentListId = list.id;
+  state.activeWhList.diary = list.id;
+  document.getElementById("dy-content").innerHTML = list.content || "";
+  saveState();
+});
+
+document.getElementById("dy-content").addEventListener("input", scheduleDiaryAutosave);
+
+/* ---- formatting commands ---- */
+function diaryExec(cmd, value = null) {
+  const content = document.getElementById("dy-content");
+  content.focus();
+  try {
+    document.execCommand(cmd, false, value);
+  } catch (e) {
+    /* execCommand is legacy but broadly supported; fail silently if unavailable */
+  }
+  scheduleDiaryAutosave();
+}
+document.getElementById("dy-bold-btn").addEventListener("click", () => diaryExec("bold"));
+document.getElementById("dy-italic-btn").addEventListener("click", () => diaryExec("italic"));
+document.getElementById("dy-underline-btn").addEventListener("click", () => diaryExec("underline"));
+document.getElementById("dy-highlight-btn").addEventListener("click", () => diaryExec("hiliteColor", "#fff59d"));
+
+/* font size dropdown */
+function closeAllDiaryDropdowns() {
+  document.getElementById("dy-fontsize-menu").classList.add("hidden");
+  document.getElementById("dy-align-menu").classList.add("hidden");
+}
+document.getElementById("dy-fontsize-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("dy-fontsize-menu");
+  const wasHidden = menu.classList.contains("hidden");
+  closeAllDiaryDropdowns();
+  menu.classList.toggle("hidden", !wasHidden);
+});
+document.querySelectorAll("#dy-fontsize-menu [data-size]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    diaryExec("fontSize", btn.dataset.size);
+    document.getElementById("dy-fontsize-btn").textContent = btn.textContent + " ▾";
+    document.getElementById("dy-fontsize-menu").classList.add("hidden");
+  });
+});
+
+/* alignment / list dropdown */
+document.getElementById("dy-align-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("dy-align-menu");
+  const wasHidden = menu.classList.contains("hidden");
+  closeAllDiaryDropdowns();
+  menu.classList.toggle("hidden", !wasHidden);
+});
+document.querySelectorAll("#dy-align-menu [data-cmd]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    diaryExec(btn.dataset.cmd);
+    document.getElementById("dy-align-menu").classList.add("hidden");
+  });
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".diary-dd-wrap")) closeAllDiaryDropdowns();
+});
+
+/* text color */
+document.getElementById("dy-color-btn").addEventListener("click", () => {
+  document.getElementById("dy-color-input").click();
+});
+document.getElementById("dy-color-input").addEventListener("input", (e) => {
+  diaryExec("foreColor", e.target.value);
+  document.getElementById("dy-color-btn").style.color = e.target.value;
+  document.getElementById("dy-color-btn").style.borderColor = e.target.value;
+});
+
+/* dashed-box custom command (no native execCommand equivalent) */
+document.getElementById("dy-box-btn").addEventListener("click", () => {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) {
+    showToast("Hãy bôi đen đoạn chữ cần đóng khung trước.");
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  const span = document.createElement("span");
+  span.className = "diary-boxed";
+  try {
+    range.surroundContents(span);
+  } catch (err) {
+    const frag = range.extractContents();
+    span.appendChild(frag);
+    range.insertNode(span);
+  }
+  scheduleDiaryAutosave();
+});
+
+/* edit / view mode toggle */
+document.getElementById("dy-mode-btn").addEventListener("click", () => {
+  const content = document.getElementById("dy-content");
+  const isCurrentlyEditable = content.contentEditable === "true";
+  if (isCurrentlyEditable) {
+    saveDiaryContent();
+    content.contentEditable = "false";
+  } else {
+    content.contentEditable = "true";
+    content.focus();
+  }
+  document.getElementById("dy-mode-btn").classList.toggle("active-state", isCurrentlyEditable);
+});
+
+/* keyboard shortcuts while editing */
+document.getElementById("dy-content").addEventListener("keydown", (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl) return;
+  const key = e.key.toLowerCase();
+  if (!e.shiftKey && key === "b") { e.preventDefault(); diaryExec("bold"); }
+  else if (!e.shiftKey && key === "i") { e.preventDefault(); diaryExec("italic"); }
+  else if (!e.shiftKey && key === "u") { e.preventDefault(); diaryExec("underline"); }
+  else if (e.shiftKey && key === "h") { e.preventDefault(); diaryExec("hiliteColor", "#fff59d"); }
+  else if (e.shiftKey && key === "d") { e.preventDefault(); document.getElementById("dy-box-btn").click(); }
+  else if (e.shiftKey && key === "l") { e.preventDefault(); diaryExec("justifyLeft"); }
+  else if (e.shiftKey && key === "e") { e.preventDefault(); diaryExec("justifyCenter"); }
+  else if (e.shiftKey && key === "r") { e.preventDefault(); diaryExec("justifyRight"); }
+  else if (e.shiftKey && key === "m") { e.preventDefault(); document.getElementById("dy-mode-btn").click(); }
+  else if (e.shiftKey && e.code === "Digit7") { e.preventDefault(); diaryExec("insertOrderedList"); }
+  else if (e.shiftKey && e.code === "Digit8") { e.preventDefault(); diaryExec("insertUnorderedList"); }
+  else if (e.key === ">") { e.preventDefault(); diaryExec("fontSize", "5"); document.getElementById("dy-fontsize-btn").textContent = "Lớn ▾"; }
+  else if (e.key === "<") { e.preventDefault(); diaryExec("fontSize", "2"); document.getElementById("dy-fontsize-btn").textContent = "Nhỏ ▾"; }
 });
 
 /* ============================================================
