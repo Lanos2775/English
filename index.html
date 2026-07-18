@@ -14,14 +14,11 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <h1 class="brand">Nox</h1>
-      <div class="sidebar-header-right">
-        <button class="diary-quick-btn" id="diary-quick-open" title="Nhật ký nhanh">📔</button>
-        <div class="theme-level-control" id="theme-level-control" title="Màu giao diện">
-          <button class="theme-dot theme-dot-1" data-level="1" title="Trắng"></button>
-          <button class="theme-dot theme-dot-2" data-level="2" title="Ngả vàng"></button>
-          <button class="theme-dot theme-dot-3" data-level="3" title="Hồng"></button>
-          <button class="theme-dot theme-dot-4" data-level="4" title="Đen"></button>
-        </div>
+      <div class="theme-level-control" id="theme-level-control" title="Màu giao diện">
+        <button class="theme-dot theme-dot-1" data-level="1" title="Trắng"></button>
+        <button class="theme-dot theme-dot-2" data-level="2" title="Ngả vàng"></button>
+        <button class="theme-dot theme-dot-3" data-level="3" title="Hồng"></button>
+        <button class="theme-dot theme-dot-4" data-level="4" title="Đen"></button>
       </div>
     </div>
 
@@ -238,21 +235,15 @@
         <button class="wh-cat-btn active" data-wh-cat="flashcard">Thẻ</button>
         <button class="wh-cat-btn" data-wh-cat="writing">Viết</button>
         <button class="wh-cat-btn" data-wh-cat="dictionary">Từ điển</button>
-        <button class="wh-cat-btn" data-wh-cat="diary">Nhật Ký</button>
       </div>
 
       <div class="wh-list-title" id="wh-current-list-title">Danh sách 1</div>
 
-      <div class="wh-table-wrap" id="wh-table-wrap">
+      <div class="wh-table-wrap">
         <div class="wh-table" id="wh-table"></div>
       </div>
 
-      <div class="wh-diary-preview hidden" id="wh-diary-preview">
-        <div class="wh-diary-preview-content" id="wh-diary-preview-content"></div>
-        <button class="block-btn primary" id="wh-diary-open-editor">✎ Mở để viết</button>
-      </div>
-
-      <div class="wh-toolbar" id="wh-toolbar">
+      <div class="wh-toolbar">
         <div class="wh-toolbar-right">
           <button class="pill-btn-outline" id="wh-clear-all">Xóa hết</button>
           <span class="wh-progress" id="wh-progress">Tiến độ: 0%</span>
@@ -261,7 +252,7 @@
         </div>
       </div>
 
-      <div class="wh-legend" id="wh-legend">
+      <div class="wh-legend">
         <div class="legend-item"><span class="dot dot-learning"></span><span id="wh-legend-1">Đang học</span></div>
         <div class="legend-item"><span class="dot dot-known"></span><span id="wh-legend-2">Đã biết</span></div>
         <div class="legend-item"><span class="dot dot-difficult"></span><span id="wh-legend-3">Khó</span></div>
@@ -353,57 +344,6 @@
       <button class="pill-btn primary flex-1" id="generic-confirm-ok">Đồng ý</button>
       <button class="pill-btn-outline flex-1" id="generic-confirm-cancel">Hủy</button>
     </div>
-  </div>
-</div>
-
-<!-- ============ DIARY (NHẬT KÝ) POPUP ============ -->
-<div class="overlay hidden" id="diary-popup-overlay">
-  <div class="diary-popup-panel">
-    <div class="diary-toolbar">
-      <div class="diary-toolbar-left">
-        <div class="diary-dd-wrap">
-          <button class="diary-tool-btn diary-fontsize-btn" id="dy-fontsize-btn" title="Cỡ chữ">14 ▾</button>
-          <div class="diary-dropdown-menu hidden" id="dy-fontsize-menu">
-            <button type="button" data-size="2">Nhỏ</button>
-            <button type="button" data-size="3">Vừa</button>
-            <button type="button" data-size="5">Lớn</button>
-            <button type="button" data-size="7">Rất lớn</button>
-          </div>
-        </div>
-
-        <div class="diary-dd-wrap">
-          <button class="diary-tool-btn diary-color-btn" id="dy-color-btn" title="Màu chữ">A</button>
-          <input type="color" id="dy-color-input" class="diary-color-input" value="#7c3aed">
-        </div>
-
-        <button class="diary-tool-btn diary-highlight-btn" id="dy-highlight-btn" title="Highlight (Ctrl+Shift+H)">H</button>
-        <button class="diary-tool-btn" id="dy-bold-btn" title="In đậm (Ctrl+B)"><b>B</b></button>
-        <button class="diary-tool-btn" id="dy-italic-btn" title="In nghiêng (Ctrl+I)"><i>I</i></button>
-        <button class="diary-tool-btn" id="dy-underline-btn" title="Gạch chân (Ctrl+U)"><u>U</u></button>
-
-        <div class="diary-dd-wrap">
-          <button class="diary-tool-btn" id="dy-align-btn" title="Căn lề & danh sách">≡ ▾</button>
-          <div class="diary-dropdown-menu hidden" id="dy-align-menu">
-            <button type="button" data-cmd="justifyLeft">⯇ Căn trái <kbd>Ctrl+Shift+L</kbd></button>
-            <button type="button" data-cmd="justifyCenter">☰ Căn giữa <kbd>Ctrl+Shift+E</kbd></button>
-            <button type="button" data-cmd="justifyRight">⯈ Căn phải <kbd>Ctrl+Shift+R</kbd></button>
-            <button type="button" data-cmd="insertOrderedList">1. Danh sách đánh số <kbd>Ctrl+Shift+7</kbd></button>
-            <button type="button" data-cmd="insertUnorderedList">• Danh sách dấu chấm <kbd>Ctrl+Shift+8</kbd></button>
-          </div>
-        </div>
-
-        <button class="diary-tool-btn" id="dy-box-btn" title="Đóng khung nét đứt (Ctrl+Shift+D) — bôi đen chữ trước">▭</button>
-      </div>
-
-      <div class="diary-toolbar-right">
-        <button class="diary-tool-btn" id="dy-mode-btn" title="Chuyển chỉnh sửa / xem (Ctrl+Shift+M)">✎</button>
-        <select id="dy-note-select" class="diary-note-select" title="Đổi ghi chú"></select>
-        <button class="diary-close-btn" id="dy-close-btn" title="Đóng (Esc)">✕</button>
-      </div>
-    </div>
-
-    <div class="diary-content" id="dy-content" contenteditable="true" spellcheck="false"
-         data-placeholder="Viết gì đó ..."></div>
   </div>
 </div>
 
