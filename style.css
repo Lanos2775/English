@@ -328,6 +328,48 @@ input,textarea{font-family:inherit;}
 .writing-answer-input:focus{outline:2px solid var(--accent);outline-offset:1px;}
 .writing-btn-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;}
 
+.quick-translate-bar{
+  display:flex;align-items:stretch;gap:10px;
+  margin-top:18px;
+}
+.qt-box{
+  flex:1;min-width:0;
+  border:1.5px solid var(--border);
+  border-radius:var(--radius-md);
+  padding:12px 16px;
+  font-size:.9rem;
+  background:var(--panel);color:var(--text);
+}
+.qt-input-box{font-family:inherit;}
+.qt-input-box:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.qt-result-box{
+  display:flex;align-items:center;
+  color:var(--accent);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.qt-result-box:empty::before{
+  content:attr(data-placeholder);
+  color:var(--text-muted);font-weight:400;
+}
+.qt-result-box.qt-error{color:var(--difficult);font-weight:500;}
+.qt-result-box.qt-loading{color:var(--text-muted);font-weight:400;font-style:italic;}
+.qt-swap-btn{
+  flex-shrink:0;width:40px;
+  border:1.5px solid var(--border);
+  border-radius:var(--radius-md);
+  background:var(--panel);color:var(--text);
+  font-size:1rem;
+}
+.qt-swap-btn:hover{background:var(--accent-soft);}
+.qt-save-btn{
+  flex-shrink:0;width:44px;
+  border:1.5px solid var(--border);
+  border-radius:var(--radius-md);
+  background:var(--panel);color:var(--text);
+  font-size:1.05rem;
+}
+.qt-save-btn:hover{background:var(--accent-soft);}
+
 /* ---- Quiz ---- */
 .quiz-topbar{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;

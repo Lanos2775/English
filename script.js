@@ -705,10 +705,11 @@ document.getElementById("wr-show-all").addEventListener("click", () => {
   renderWrFeedback();
 });
 document.getElementById("wr-translate").addEventListener("click", () => {
-  const item = currentWrItem();
-  if (!item) return;
-  const url = "https://translate.google.com/?sl=vi&tl=en&text=" + encodeURIComponent(item.vi) + "&op=translate";
-  window.open(url, "_blank");
+  const bar = document.getElementById("quick-translate-bar");
+  const nowHidden = bar.classList.toggle("hidden");
+  if (!nowHidden) {
+    setTimeout(() => document.getElementById("qt-input").focus(), 50);
+  }
 });
 document.getElementById("wr-answer").addEventListener("click", () => {
   const item = currentWrItem();
@@ -754,6 +755,107 @@ document.getElementById("wr-reset-status").addEventListener("click", () => {
 
 // clicking the prompt also advances to the next question
 document.getElementById("wr-prompt").addEventListener("click", wrGoNext);
+
+/* ============================================================
+   QUICK TRANSLATE BAR (bottom of Viết tab)
+   ============================================================ */
+const qt = { dir: "vi-en", lastEn: "", lastVi: "", debounceHandle: null, requestId: 0 };
+
+function qtUpdateDirButton() {
+  const btn = document.getElementById("qt-dir-toggle");
+  btn.title = qt.dir === "vi-en" ? "Đổi chiều dịch (V → E)" : "Đổi chiều dịch (E → V)";
+  document.getElementById("qt-input").placeholder =
+    qt.dir === "vi-en" ? "Nhập từ hoặc cụm từ tiếng Việt ..." : "Nhập từ hoặc cụm từ tiếng Anh ...";
+}
+document.getElementById("qt-dir-toggle").addEventListener("click", () => {
+  qt.dir = qt.dir === "vi-en" ? "en-vi" : "vi-en";
+  qtUpdateDirButton();
+  // swap current input/result so the user can keep going in the new direction
+  const input = document.getElementById("qt-input");
+  const resultBox = document.getElementById("qt-result");
+  const prevResult = resultBox.textContent;
+  if (prevResult) {
+    input.value = prevResult;
+    resultBox.textContent = "";
+    qtTranslate();
+  }
+});
+qtUpdateDirButton();
+
+async function qtTranslate() {
+  const text = document.getElementById("qt-input").value.trim();
+  const resultBox = document.getElementById("qt-result");
+  resultBox.classList.remove("qt-error", "qt-loading");
+  if (!text) {
+    resultBox.textContent = "";
+    qt.lastEn = "";
+    qt.lastVi = "";
+    return;
+  }
+  resultBox.textContent = "Đang dịch...";
+  resultBox.classList.add("qt-loading");
+  const myRequestId = ++qt.requestId;
+  const langpair = qt.dir === "vi-en" ? "vi|en" : "en|vi";
+  try {
+    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}`);
+    const data = await res.json();
+    if (myRequestId !== qt.requestId) return; // a newer request has since started, discard this one
+    const translated = data && data.responseData && data.responseData.translatedText;
+    resultBox.classList.remove("qt-loading");
+    if (!translated) {
+      resultBox.textContent = "Không tìm thấy bản dịch.";
+      resultBox.classList.add("qt-error");
+      qt.lastEn = "";
+      qt.lastVi = "";
+      return;
+    }
+    resultBox.textContent = translated;
+    if (qt.dir === "vi-en") {
+      qt.lastVi = text;
+      qt.lastEn = translated;
+    } else {
+      qt.lastEn = text;
+      qt.lastVi = translated;
+    }
+  } catch (err) {
+    if (myRequestId !== qt.requestId) return;
+    resultBox.classList.remove("qt-loading");
+    resultBox.textContent = "Lỗi kết nối, thử lại sau.";
+    resultBox.classList.add("qt-error");
+    qt.lastEn = "";
+    qt.lastVi = "";
+  }
+}
+document.getElementById("qt-input").addEventListener("input", () => {
+  clearTimeout(qt.debounceHandle);
+  qt.debounceHandle = setTimeout(qtTranslate, 600);
+});
+document.getElementById("qt-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    clearTimeout(qt.debounceHandle);
+    qtTranslate();
+  }
+});
+
+document.getElementById("qt-save").addEventListener("click", () => {
+  if (!qt.lastEn || !qt.lastVi) {
+    showToast("Chưa có bản dịch để lưu.");
+    return;
+  }
+  let list = getList("dictionary", state.activeWhList.dictionary);
+  if (!list) {
+    list = getCategory("dictionary")[0];
+    if (!list) {
+      list = defaultList("Danh sách 1");
+      getCategory("dictionary").push(list);
+    }
+    state.activeWhList.dictionary = list.id;
+  }
+  list.items.push({ id: uid(), en: qt.lastEn, vi: qt.lastVi, status: "new" });
+  saveState();
+  showToast(`Đã lưu vào Từ điển — ${list.name}`);
+});
 
 /* ============================================================
    TAB 3: QUIZZ

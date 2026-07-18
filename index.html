@@ -187,6 +187,13 @@
         <button class="block-btn" id="wr-translate">Dịch</button>
         <button class="block-btn" id="wr-answer">Đáp án</button>
       </div>
+
+      <div class="quick-translate-bar hidden" id="quick-translate-bar">
+        <input type="text" id="qt-input" class="qt-box qt-input-box" placeholder="Nhập từ hoặc cụm từ cần dịch ...">
+        <button class="qt-swap-btn" id="qt-dir-toggle" title="Đổi chiều dịch (V → E)">⇄</button>
+        <div class="qt-box qt-result-box" id="qt-result" data-placeholder="Bản dịch hiện ở đây ..."></div>
+        <button class="qt-save-btn" id="qt-save" title="Lưu nhanh vào Từ điển">🔖</button>
+      </div>
     </section>
 
     <!-- ---- Quiz main ---- -->
@@ -342,6 +349,25 @@
 
 <!-- ============ TOAST ============ -->
 <div class="toast-container" id="toast-container"></div>
+
+<!-- ============ POPUP: Dịch nhanh ============ -->
+<div class="overlay hidden" id="translate-overlay">
+  <div class="modal-panel small">
+    <div class="popup-header">
+      <span>Dịch nhanh</span>
+      <button class="popup-close" id="translate-close">✕</button>
+    </div>
+    <div class="translate-block">
+      <div class="translate-label">Tiếng Việt</div>
+      <div class="translate-text" id="translate-src"></div>
+    </div>
+    <div class="translate-block">
+      <div class="translate-label">Tiếng Anh</div>
+      <div class="translate-text" id="translate-result">Đang dịch ...</div>
+    </div>
+    <a href="#" target="_blank" rel="noopener" id="translate-open-google" class="block-btn" style="display:block;text-align:center;margin-top:12px;text-decoration:none;">Mở Google Translate</a>
+  </div>
+</div>
 
 <script src="script.js"></script>
 </body>
