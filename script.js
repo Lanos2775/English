@@ -814,149 +814,160 @@ document.getElementById("wr-reset-status").addEventListener("click", () => {
   renderWritingTab();
 });
 
-// selecting text inside the prompt auto-fills & translates it in the quick-translate bar
+// selecting text inside the prompt auto-fills & translates it in the writing tab's quick-translate bar
 document.getElementById("wr-prompt").addEventListener("mouseup", () => {
   const sel = window.getSelection();
   const text = sel ? sel.toString().trim() : "";
   if (!text) return;
-  document.getElementById("qt-input").value = text;
   document.getElementById("quick-translate-bar").classList.remove("hidden");
-  clearTimeout(qt.debounceHandle);
-  qtTranslate();
+  qtWriting.setInputAndTranslate(text);
 });
 
 /* ============================================================
-   QUICK TRANSLATE BAR (bottom of Viết tab)
+   QUICK TRANSLATE BAR — reusable factory, instantiated once for
+   the Viết tab ("qt") and once for the Thẻ tab ("qt2")
    ============================================================ */
-const qt = { dir: "vi-en", lastEn: "", lastVi: "", debounceHandle: null, requestId: 0 };
+function createQuickTranslateBar(prefix) {
+  const qs = { dir: "vi-en", lastEn: "", lastVi: "", debounceHandle: null, requestId: 0 };
+  const inputEl = document.getElementById(`${prefix}-input`);
+  const dirBtn = document.getElementById(`${prefix}-dir-toggle`);
+  const resultBox = document.getElementById(`${prefix}-result`);
+  const saveBtn = document.getElementById(`${prefix}-save`);
 
-function qtUpdateDirButton() {
-  const btn = document.getElementById("qt-dir-toggle");
-  btn.title = qt.dir === "vi-en" ? "Đổi chiều dịch (V → E)" : "Đổi chiều dịch (E → V)";
-  document.getElementById("qt-input").placeholder =
-    qt.dir === "vi-en" ? "Nhập từ hoặc cụm từ tiếng Việt ..." : "Nhập từ hoặc cụm từ tiếng Anh ...";
-}
-document.getElementById("qt-dir-toggle").addEventListener("click", () => {
-  const prevTranslated = qt.dir === "vi-en" ? qt.lastEn : qt.lastVi;
-  qt.dir = qt.dir === "vi-en" ? "en-vi" : "vi-en";
-  qtUpdateDirButton();
-  // carry the previously translated result over as the new input, so the user can keep going
-  if (prevTranslated) {
-    document.getElementById("qt-input").value = prevTranslated;
-    document.getElementById("qt-result").innerHTML = "";
-    qtTranslate();
+  function updateDirButton() {
+    dirBtn.title = qs.dir === "vi-en" ? "Đổi chiều dịch (V → E)" : "Đổi chiều dịch (E → V)";
+    inputEl.placeholder = qs.dir === "vi-en" ? "Nhập từ hoặc cụm từ tiếng Việt ..." : "Nhập từ hoặc cụm từ tiếng Anh ...";
   }
-});
-qtUpdateDirButton();
 
-async function qtTranslate() {
-  const text = document.getElementById("qt-input").value.trim();
-  const resultBox = document.getElementById("qt-result");
-  resultBox.classList.remove("qt-error", "qt-loading");
-  if (!text) {
-    resultBox.innerHTML = "";
-    qt.lastEn = "";
-    qt.lastVi = "";
-    return;
-  }
-  resultBox.textContent = "Đang dịch...";
-  resultBox.classList.add("qt-loading");
-  const myRequestId = ++qt.requestId;
-  const langpair = qt.dir === "vi-en" ? "vi|en" : "en|vi";
-  try {
-    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}&de=nox-app@example.com`);
-    const data = await res.json();
-    if (myRequestId !== qt.requestId) return; // a newer request has since started, discard this one
-    resultBox.classList.remove("qt-loading");
-
-    // Gather candidate translations: the primary result plus any alternate
-    // matches MyMemory found in its translation memory (gives synonyms).
-    let candidates = [];
-    const primary = data && data.responseData && data.responseData.translatedText;
-    if (primary) candidates.push(primary.trim());
-    if (Array.isArray(data.matches)) {
-      data.matches
-        .slice()
-        .sort((a, b) => (b.match || 0) - (a.match || 0))
-        .forEach((m) => {
-          const t = (m.translation || "").trim();
-          if (t) candidates.push(t);
-        });
-    }
-    // de-duplicate case-insensitively, keep original order, drop anything
-    // that's just the source text echoed back unchanged
-    const seen = new Set();
-    candidates = candidates.filter((c) => {
-      const key = c.toLowerCase();
-      if (!c || key === text.toLowerCase() || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).slice(0, 6);
-
-    if (!candidates.length) {
-      resultBox.textContent = "Không tìm thấy bản dịch.";
-      resultBox.classList.add("qt-error");
-      qt.lastEn = "";
-      qt.lastVi = "";
+  async function translate() {
+    const text = inputEl.value.trim();
+    resultBox.classList.remove("qt-error", "qt-loading");
+    if (!text) {
+      resultBox.innerHTML = "";
+      qs.lastEn = "";
+      qs.lastVi = "";
       return;
     }
+    resultBox.textContent = "Đang dịch...";
+    resultBox.classList.add("qt-loading");
+    const myRequestId = ++qs.requestId;
+    const langpair = qs.dir === "vi-en" ? "vi|en" : "en|vi";
+    try {
+      const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}&de=nox-app@example.com`);
+      const data = await res.json();
+      if (myRequestId !== qs.requestId) return; // a newer request has since started, discard this one
+      resultBox.classList.remove("qt-loading");
 
-    resultBox.innerHTML = "";
-    candidates.forEach((c, idx) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "qt-candidate" + (idx === 0 ? " qt-candidate-primary qt-candidate-selected" : "");
-      chip.textContent = c;
-      chip.title = "Nhấn để chọn nghĩa này";
-      chip.addEventListener("click", () => {
-        resultBox.querySelectorAll(".qt-candidate").forEach((el) => el.classList.remove("qt-candidate-selected"));
-        chip.classList.add("qt-candidate-selected");
-        if (qt.dir === "vi-en") { qt.lastVi = text; qt.lastEn = c; }
-        else { qt.lastEn = text; qt.lastVi = c; }
+      // Gather candidate translations: the primary result plus any alternate
+      // matches MyMemory found in its translation memory (gives synonyms).
+      let candidates = [];
+      const primary = data && data.responseData && data.responseData.translatedText;
+      if (primary) candidates.push(primary.trim());
+      if (Array.isArray(data.matches)) {
+        data.matches
+          .slice()
+          .sort((a, b) => (b.match || 0) - (a.match || 0))
+          .forEach((m) => {
+            const t = (m.translation || "").trim();
+            if (t) candidates.push(t);
+          });
+      }
+      const seen = new Set();
+      candidates = candidates.filter((c) => {
+        const key = c.toLowerCase();
+        if (!c || key === text.toLowerCase() || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 6);
+
+      if (!candidates.length) {
+        resultBox.textContent = "Không tìm thấy bản dịch.";
+        resultBox.classList.add("qt-error");
+        qs.lastEn = "";
+        qs.lastVi = "";
+        return;
+      }
+
+      resultBox.innerHTML = "";
+      candidates.forEach((c, idx) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "qt-candidate" + (idx === 0 ? " qt-candidate-primary qt-candidate-selected" : "");
+        chip.textContent = c;
+        chip.title = "Nhấn để chọn nghĩa này";
+        chip.addEventListener("click", () => {
+          resultBox.querySelectorAll(".qt-candidate").forEach((el) => el.classList.remove("qt-candidate-selected"));
+          chip.classList.add("qt-candidate-selected");
+          if (qs.dir === "vi-en") { qs.lastVi = text; qs.lastEn = c; }
+          else { qs.lastEn = text; qs.lastVi = c; }
+        });
+        resultBox.appendChild(chip);
       });
-      resultBox.appendChild(chip);
-    });
-    if (qt.dir === "vi-en") { qt.lastVi = text; qt.lastEn = candidates[0]; }
-    else { qt.lastEn = text; qt.lastVi = candidates[0]; }
-  } catch (err) {
-    if (myRequestId !== qt.requestId) return;
-    resultBox.classList.remove("qt-loading");
-    resultBox.textContent = "Lỗi kết nối, thử lại sau.";
-    resultBox.classList.add("qt-error");
-    qt.lastEn = "";
-    qt.lastVi = "";
-  }
-}
-document.getElementById("qt-input").addEventListener("input", () => {
-  clearTimeout(qt.debounceHandle);
-  qt.debounceHandle = setTimeout(qtTranslate, 600);
-});
-document.getElementById("qt-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    clearTimeout(qt.debounceHandle);
-    qtTranslate();
-  }
-});
-
-document.getElementById("qt-save").addEventListener("click", () => {
-  if (!qt.lastEn || !qt.lastVi) {
-    showToast("Chưa có bản dịch để lưu.");
-    return;
-  }
-  let list = getList("dictionary", state.activeWhList.dictionary);
-  if (!list) {
-    list = getCategory("dictionary")[0];
-    if (!list) {
-      list = defaultList("Danh sách 1");
-      getCategory("dictionary").push(list);
+      if (qs.dir === "vi-en") { qs.lastVi = text; qs.lastEn = candidates[0]; }
+      else { qs.lastEn = text; qs.lastVi = candidates[0]; }
+    } catch (err) {
+      if (myRequestId !== qs.requestId) return;
+      resultBox.classList.remove("qt-loading");
+      resultBox.textContent = "Lỗi kết nối, thử lại sau.";
+      resultBox.classList.add("qt-error");
+      qs.lastEn = "";
+      qs.lastVi = "";
     }
-    state.activeWhList.dictionary = list.id;
   }
-  list.items.push({ id: uid(), en: qt.lastEn, vi: qt.lastVi, status: "new" });
-  saveState();
-  showToast(`Đã lưu vào Từ điển — ${list.name}`);
-});
+
+  dirBtn.addEventListener("click", () => {
+    const prevTranslated = qs.dir === "vi-en" ? qs.lastEn : qs.lastVi;
+    qs.dir = qs.dir === "vi-en" ? "en-vi" : "vi-en";
+    updateDirButton();
+    if (prevTranslated) {
+      inputEl.value = prevTranslated;
+      resultBox.innerHTML = "";
+      translate();
+    }
+  });
+  inputEl.addEventListener("input", () => {
+    clearTimeout(qs.debounceHandle);
+    qs.debounceHandle = setTimeout(translate, 600);
+  });
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(qs.debounceHandle);
+      translate();
+    }
+  });
+  saveBtn.addEventListener("click", () => {
+    if (!qs.lastEn || !qs.lastVi) {
+      showToast("Chưa có bản dịch để lưu.");
+      return;
+    }
+    let list = getList("dictionary", state.activeWhList.dictionary);
+    if (!list) {
+      list = getCategory("dictionary")[0];
+      if (!list) {
+        list = defaultList("Danh sách 1");
+        getCategory("dictionary").push(list);
+      }
+      state.activeWhList.dictionary = list.id;
+    }
+    list.items.push({ id: uid(), en: qs.lastEn, vi: qs.lastVi, status: "new" });
+    saveState();
+    showToast(`Đã lưu vào Từ điển — ${list.name}`);
+  });
+
+  updateDirButton();
+
+  return {
+    setInputAndTranslate(text) {
+      inputEl.value = text;
+      clearTimeout(qs.debounceHandle);
+      translate();
+    },
+  };
+}
+
+const qtWriting = createQuickTranslateBar("qt");
+const qtFlashcard = createQuickTranslateBar("qt2");
 
 /* ============================================================
    TAB 3: QUIZZ
