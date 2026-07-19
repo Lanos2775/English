@@ -11,6 +11,9 @@ function uid() {
 function defaultList(name) {
   return { id: uid(), name, items: [] };
 }
+function defaultDiaryList(name) {
+  return { id: uid(), name, content: "" };
+}
 
 function defaultState() {
   return {
@@ -19,9 +22,10 @@ function defaultState() {
       flashcard: [defaultList("Danh sách 1")],
       writing: [defaultList("Danh sách 1")],
       dictionary: [defaultList("Danh sách 1")],
+      diary: [defaultDiaryList("Nhật ký 1")],
     },
     selected: { flashcard: [], writing: [] },
-    activeWhList: { flashcard: null, writing: null, dictionary: null },
+    activeWhList: { flashcard: null, writing: null, dictionary: null, diary: null },
   };
 }
 
@@ -33,7 +37,11 @@ function loadState() {
     // basic shape guard
     if (!parsed.categories) return defaultState();
     if (!parsed.selected) parsed.selected = { flashcard: [], writing: [] };
-    if (!parsed.activeWhList) parsed.activeWhList = { flashcard: null, writing: null, dictionary: null };
+    if (!parsed.activeWhList) parsed.activeWhList = { flashcard: null, writing: null, dictionary: null, diary: null };
+    if (!parsed.categories.diary || !parsed.categories.diary.length) {
+      parsed.categories.diary = [defaultDiaryList("Nhật ký 1")];
+    }
+    if (!("diary" in parsed.activeWhList)) parsed.activeWhList.diary = null;
     if (!parsed.themeLevel) {
       // migrate from old light/dark boolean theme if present
       parsed.themeLevel = parsed.theme === "dark" ? 4 : 1;
@@ -498,8 +506,11 @@ const wr = {
   filter: "undone",
   queue: [],
   index: 0,
-  revealed: 0, // number of characters revealed via hint
   checked: false, // has current question been checked via Enter/Đáp án?
+  hidePreview: false, // "Ẩn xem trước" mode: don't reveal letter/word-count structure
+  charHintCount: 0,
+  wordHintCount: 0,
+  flashTimeout: null,
 };
 
 const PUNCT_REGEX = /[.,!?;:"'()…“”‘’\-]/g;
@@ -508,6 +519,12 @@ function stripPunct(str) {
 }
 function normalizeAnswer(str) {
   return stripPunct(str).replace(/\s+/g, " ").trim().toLowerCase();
+}
+function wrCharHintLimit() {
+  return wr.hidePreview ? 5 : 3;
+}
+function wrWordHintLimit() {
+  return wr.hidePreview ? 3 : 1;
 }
 
 function wrStatusFromFilter(f) {
@@ -527,8 +544,9 @@ function rebuildWrQueue(keep) {
   const items = wrCurrentItems();
   wr.queue = items.map((i) => i.id);
   if (!keep || wr.index >= wr.queue.length) wr.index = 0;
-  wr.revealed = 0;
   wr.checked = false;
+  wr.charHintCount = 0;
+  wr.wordHintCount = 0;
 }
 function wrItemById(id) {
   for (const l of getCategory("writing")) {
@@ -561,8 +579,9 @@ function currentWrItem() {
 }
 
 function resetWrQuestionState() {
-  wr.revealed = 0;
   wr.checked = false;
+  wr.charHintCount = 0;
+  wr.wordHintCount = 0;
   document.getElementById("wr-answer-input").value = "";
 }
 
@@ -596,41 +615,57 @@ function renderWrFeedback() {
   const typedClean = stripPunct(typedRaw);
   let tPtr = 0;
   let anyMissing = false;
+  let lastReached = true; // whether the previous position had visible info (governs punctuation visibility)
 
   for (let i = 0; i < answer.length; i++) {
     const ch = answer[i];
+
     if (ch === " ") {
-      const sp = document.createElement("span");
-      sp.className = "feedback-char space";
-      grid.appendChild(sp);
-      if (tPtr < typedClean.length && typedClean[tPtr] === " ") tPtr++;
+      const hasTypedHere = tPtr < typedClean.length;
+      if (hasTypedHere || !wr.hidePreview) {
+        const sp = document.createElement("span");
+        sp.className = "feedback-char space";
+        grid.appendChild(sp);
+      }
+      if (hasTypedHere && typedClean[tPtr] === " ") tPtr++;
+      lastReached = hasTypedHere;
       continue;
     }
+
     if (PUNCT_REGEX.test(ch)) {
       PUNCT_REGEX.lastIndex = 0;
-      const sp = document.createElement("span");
-      sp.className = "feedback-char space";
-      sp.textContent = ch;
-      sp.style.color = "var(--text-muted)";
-      sp.style.borderBottom = "none";
-      grid.appendChild(sp);
-      continue; // punctuation doesn't need to be typed
+      if (lastReached || !wr.hidePreview) {
+        const sp = document.createElement("span");
+        sp.className = "feedback-char space";
+        sp.textContent = ch;
+        sp.style.color = "var(--text-muted)";
+        sp.style.borderBottom = "none";
+        grid.appendChild(sp);
+      }
+      continue; // punctuation doesn't need to be typed, doesn't consume tPtr or change lastReached
     }
-    const span = document.createElement("span");
-    span.className = "feedback-char";
-    if (tPtr < typedClean.length) {
+
+    const hasTypedHere = tPtr < typedClean.length;
+    if (hasTypedHere) {
       const typedCh = typedClean[tPtr];
+      const span = document.createElement("span");
+      span.className = "feedback-char";
       span.textContent = typedCh;
       span.classList.add(typedCh.toLowerCase() === ch.toLowerCase() ? "correct" : "wrong");
+      grid.appendChild(span);
       tPtr++;
-    } else if (i < wr.revealed) {
-      span.textContent = ch;
-      span.classList.add("correct");
+      lastReached = true;
     } else {
-      span.textContent = "_";
       anyMissing = true;
+      lastReached = false;
+      if (!wr.hidePreview) {
+        const span = document.createElement("span");
+        span.className = "feedback-char";
+        span.textContent = "_";
+        grid.appendChild(span);
+      }
+      // in hidePreview mode, nothing is rendered for un-reached letters at all
     }
-    grid.appendChild(span);
   }
   missBadge.classList.toggle("hidden", !anyMissing);
 }
@@ -642,6 +677,21 @@ function renderWritingStatsOnly() {
   document.getElementById("wr-stat-wrong").textContent = all.filter((i) => i.status === "difficult").length;
 }
 
+function flashAnswerFeedback(isCorrect) {
+  const cls = isCorrect ? "flash-correct" : "flash-wrong";
+  const targets = [document.querySelector(".writing-card"), document.querySelector(".writing-feedback-block")];
+  targets.forEach((el) => {
+    if (!el) return;
+    el.classList.remove("flash-correct", "flash-wrong");
+    void el.offsetWidth; // restart transition
+    el.classList.add(cls);
+  });
+  clearTimeout(wr.flashTimeout);
+  wr.flashTimeout = setTimeout(() => {
+    targets.forEach((el) => el && el.classList.remove("flash-correct", "flash-wrong"));
+  }, 2000);
+}
+
 function wrCheckAnswer() {
   const item = currentWrItem();
   if (!item) return;
@@ -649,11 +699,10 @@ function wrCheckAnswer() {
   const isCorrect = normalizeAnswer(typed) === normalizeAnswer(item.en);
   item.status = isCorrect ? "known" : "difficult";
   saveState();
-  wr.revealed = item.en.length;
   renderWritingStatsOnly();
   renderWrFeedback();
   wr.checked = true;
-  showToast(isCorrect ? "Chính xác! 🎉" : "Chưa đúng. Đáp án: " + item.en);
+  flashAnswerFeedback(isCorrect);
 }
 
 document.getElementById("wr-answer-input").addEventListener("input", () => {
@@ -681,7 +730,14 @@ function revealNextChar() {
     input.value = item.en.slice(0, input.value.length + 1);
   }
   wr.checked = false;
+  wr.charHintCount++;
   renderWrFeedback();
+  if (wr.charHintCount > wrCharHintLimit()) {
+    item.status = "difficult";
+    saveState();
+    renderWritingStatsOnly();
+    flashAnswerFeedback(false);
+  }
 }
 function revealNextWord() {
   const item = currentWrItem();
@@ -693,15 +749,20 @@ function revealNextWord() {
   else nextSpace += 1;
   input.value = item.en.slice(0, Math.max(nextSpace, cur + 1));
   wr.checked = false;
+  wr.wordHintCount++;
   renderWrFeedback();
+  if (wr.wordHintCount > wrWordHintLimit()) {
+    item.status = "difficult";
+    saveState();
+    renderWritingStatsOnly();
+    flashAnswerFeedback(false);
+  }
 }
 document.getElementById("wr-show-char").addEventListener("click", revealNextChar);
 document.getElementById("wr-show-word").addEventListener("click", revealNextWord);
-document.getElementById("wr-show-all").addEventListener("click", () => {
-  const item = currentWrItem();
-  if (!item) return;
-  document.getElementById("wr-answer-input").value = item.en;
-  wr.checked = false;
+document.getElementById("wr-hide-preview-toggle").addEventListener("click", (e) => {
+  wr.hidePreview = !wr.hidePreview;
+  e.currentTarget.classList.toggle("active", wr.hidePreview);
   renderWrFeedback();
 });
 document.getElementById("wr-translate").addEventListener("click", () => {
@@ -717,10 +778,10 @@ document.getElementById("wr-answer").addEventListener("click", () => {
   item.status = "difficult";
   saveState();
   document.getElementById("wr-answer-input").value = item.en;
-  wr.revealed = item.en.length;
   wr.checked = true;
   renderWritingStatsOnly();
   renderWrFeedback();
+  flashAnswerFeedback(false);
   showToast("Đáp án: " + item.en);
   setTimeout(() => wrGoNext(), 1400);
 });
@@ -753,8 +814,16 @@ document.getElementById("wr-reset-status").addEventListener("click", () => {
   renderWritingTab();
 });
 
-// clicking the prompt also advances to the next question
-document.getElementById("wr-prompt").addEventListener("click", wrGoNext);
+// selecting text inside the prompt auto-fills & translates it in the quick-translate bar
+document.getElementById("wr-prompt").addEventListener("mouseup", () => {
+  const sel = window.getSelection();
+  const text = sel ? sel.toString().trim() : "";
+  if (!text) return;
+  document.getElementById("qt-input").value = text;
+  document.getElementById("quick-translate-bar").classList.remove("hidden");
+  clearTimeout(qt.debounceHandle);
+  qtTranslate();
+});
 
 /* ============================================================
    QUICK TRANSLATE BAR (bottom of Viết tab)
@@ -768,15 +837,13 @@ function qtUpdateDirButton() {
     qt.dir === "vi-en" ? "Nhập từ hoặc cụm từ tiếng Việt ..." : "Nhập từ hoặc cụm từ tiếng Anh ...";
 }
 document.getElementById("qt-dir-toggle").addEventListener("click", () => {
+  const prevTranslated = qt.dir === "vi-en" ? qt.lastEn : qt.lastVi;
   qt.dir = qt.dir === "vi-en" ? "en-vi" : "vi-en";
   qtUpdateDirButton();
-  // swap current input/result so the user can keep going in the new direction
-  const input = document.getElementById("qt-input");
-  const resultBox = document.getElementById("qt-result");
-  const prevResult = resultBox.textContent;
-  if (prevResult) {
-    input.value = prevResult;
-    resultBox.textContent = "";
+  // carry the previously translated result over as the new input, so the user can keep going
+  if (prevTranslated) {
+    document.getElementById("qt-input").value = prevTranslated;
+    document.getElementById("qt-result").innerHTML = "";
     qtTranslate();
   }
 });
@@ -787,7 +854,7 @@ async function qtTranslate() {
   const resultBox = document.getElementById("qt-result");
   resultBox.classList.remove("qt-error", "qt-loading");
   if (!text) {
-    resultBox.textContent = "";
+    resultBox.innerHTML = "";
     qt.lastEn = "";
     qt.lastVi = "";
     return;
@@ -797,26 +864,60 @@ async function qtTranslate() {
   const myRequestId = ++qt.requestId;
   const langpair = qt.dir === "vi-en" ? "vi|en" : "en|vi";
   try {
-    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}`);
+    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langpair}&de=nox-app@example.com`);
     const data = await res.json();
     if (myRequestId !== qt.requestId) return; // a newer request has since started, discard this one
-    const translated = data && data.responseData && data.responseData.translatedText;
     resultBox.classList.remove("qt-loading");
-    if (!translated) {
+
+    // Gather candidate translations: the primary result plus any alternate
+    // matches MyMemory found in its translation memory (gives synonyms).
+    let candidates = [];
+    const primary = data && data.responseData && data.responseData.translatedText;
+    if (primary) candidates.push(primary.trim());
+    if (Array.isArray(data.matches)) {
+      data.matches
+        .slice()
+        .sort((a, b) => (b.match || 0) - (a.match || 0))
+        .forEach((m) => {
+          const t = (m.translation || "").trim();
+          if (t) candidates.push(t);
+        });
+    }
+    // de-duplicate case-insensitively, keep original order, drop anything
+    // that's just the source text echoed back unchanged
+    const seen = new Set();
+    candidates = candidates.filter((c) => {
+      const key = c.toLowerCase();
+      if (!c || key === text.toLowerCase() || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 6);
+
+    if (!candidates.length) {
       resultBox.textContent = "Không tìm thấy bản dịch.";
       resultBox.classList.add("qt-error");
       qt.lastEn = "";
       qt.lastVi = "";
       return;
     }
-    resultBox.textContent = translated;
-    if (qt.dir === "vi-en") {
-      qt.lastVi = text;
-      qt.lastEn = translated;
-    } else {
-      qt.lastEn = text;
-      qt.lastVi = translated;
-    }
+
+    resultBox.innerHTML = "";
+    candidates.forEach((c, idx) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "qt-candidate" + (idx === 0 ? " qt-candidate-primary qt-candidate-selected" : "");
+      chip.textContent = c;
+      chip.title = "Nhấn để chọn nghĩa này";
+      chip.addEventListener("click", () => {
+        resultBox.querySelectorAll(".qt-candidate").forEach((el) => el.classList.remove("qt-candidate-selected"));
+        chip.classList.add("qt-candidate-selected");
+        if (qt.dir === "vi-en") { qt.lastVi = text; qt.lastEn = c; }
+        else { qt.lastEn = text; qt.lastVi = c; }
+      });
+      resultBox.appendChild(chip);
+    });
+    if (qt.dir === "vi-en") { qt.lastVi = text; qt.lastEn = candidates[0]; }
+    else { qt.lastEn = text; qt.lastVi = candidates[0]; }
   } catch (err) {
     if (myRequestId !== qt.requestId) return;
     resultBox.classList.remove("qt-loading");
@@ -1102,7 +1203,7 @@ document.getElementById("quiz-restart").addEventListener("click", () => {
 const wh = { cat: "flashcard" };
 
 function whCatLabel(cat) {
-  return { flashcard: "Thẻ", writing: "Viết", dictionary: "Từ điển" }[cat];
+  return { flashcard: "Thẻ", writing: "Viết", dictionary: "Từ điển", diary: "Nhật Ký" }[cat];
 }
 
 document.querySelectorAll("[data-wh-cat]").forEach((btn) => {
@@ -1141,18 +1242,40 @@ function renderWarehouseTab() {
     grid.appendChild(btn);
   });
 
-  const legendMap = {
-    flashcard: ["Đang học", "Đã biết", "Khó"],
-    writing: ["Chưa làm", "Làm đúng", "Làm sai"],
-    dictionary: ["Đang học", "Đã biết", "Khó"],
-  };
-  const [l1, l2, l3] = legendMap[wh.cat];
-  document.getElementById("wh-legend-1").textContent = l1;
-  document.getElementById("wh-legend-2").textContent = l2;
-  document.getElementById("wh-legend-3").textContent = l3;
+  const isDiary = wh.cat === "diary";
+  document.getElementById("wh-table-wrap").classList.toggle("hidden", isDiary);
+  document.getElementById("wh-diary-preview").classList.toggle("hidden", !isDiary);
+  document.getElementById("wh-toolbar").classList.toggle("hidden", isDiary);
+  document.getElementById("wh-legend").classList.toggle("hidden", isDiary);
+
+  if (!isDiary) {
+    const legendMap = {
+      flashcard: ["Đang học", "Đã biết", "Khó"],
+      writing: ["Chưa làm", "Làm đúng", "Làm sai"],
+      dictionary: ["Đang học", "Đã biết", "Khó"],
+    };
+    const [l1, l2, l3] = legendMap[wh.cat];
+    document.getElementById("wh-legend-1").textContent = l1;
+    document.getElementById("wh-legend-2").textContent = l2;
+    document.getElementById("wh-legend-3").textContent = l3;
+  }
 
   document.getElementById("wh-current-list-title").textContent = activeList ? activeList.name : "—";
-  renderWhTable();
+  if (isDiary) {
+    renderDiaryPreview();
+  } else {
+    renderWhTable();
+  }
+}
+
+function renderDiaryPreview() {
+  const list = whActiveList();
+  const box = document.getElementById("wh-diary-preview-content");
+  if (!list || !list.content || !list.content.trim()) {
+    box.innerHTML = `<p class="wh-diary-empty">Chưa có nội dung. Nhấn "Mở để viết" để bắt đầu ghi chép.</p>`;
+  } else {
+    box.innerHTML = list.content;
+  }
 }
 
 let whDragSrcId = null;
@@ -1248,9 +1371,10 @@ function renderWhTable() {
 }
 
 async function addWhList() {
-  const name = await showPrompt("Tên danh sách mới", "Danh sách " + (getCategory(wh.cat).length + 1));
+  const defaultName = wh.cat === "diary" ? "Nhật ký " + (getCategory(wh.cat).length + 1) : "Danh sách " + (getCategory(wh.cat).length + 1);
+  const name = await showPrompt("Tên danh sách mới", defaultName);
   if (!name) return;
-  const list = defaultList(name);
+  const list = wh.cat === "diary" ? defaultDiaryList(name) : defaultList(name);
   getCategory(wh.cat).push(list);
   state.activeWhList[wh.cat] = list.id;
   saveState();
@@ -1500,6 +1624,258 @@ document.getElementById("wh-import-file").addEventListener("change", (e) => {
   };
   reader.readAsText(file);
 });
+
+/* ============================================================
+   NHẬT KÝ (DIARY) — quick popup rich-text editor
+   ============================================================ */
+let diaryCurrentListId = null;
+let diaryAutosaveHandle = null;
+
+function diaryActiveList() {
+  const lists = getCategory("diary");
+  let activeId = state.activeWhList.diary;
+  if (!activeId || !lists.find((l) => l.id === activeId)) {
+    activeId = lists[0] ? lists[0].id : null;
+    state.activeWhList.diary = activeId;
+  }
+  return lists.find((l) => l.id === activeId) || null;
+}
+
+function renderDiaryNoteSelect() {
+  const select = document.getElementById("dy-note-select");
+  select.innerHTML = "";
+  getCategory("diary").forEach((l) => {
+    const opt = document.createElement("option");
+    opt.value = l.id;
+    opt.textContent = l.name;
+    if (l.id === diaryCurrentListId) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function openDiaryPopup(listId) {
+  let target = listId ? getCategory("diary").find((l) => l.id === listId) : diaryActiveList();
+  if (!target) {
+    target = defaultDiaryList("Nhật ký 1");
+    getCategory("diary").push(target);
+  }
+  diaryCurrentListId = target.id;
+  state.activeWhList.diary = target.id;
+  saveState();
+
+  const content = document.getElementById("dy-content");
+  content.innerHTML = target.content || "";
+  content.contentEditable = "true";
+  document.getElementById("dy-mode-btn").classList.remove("active-state");
+  closeAllDiaryDropdowns();
+  renderDiaryNoteSelect();
+  document.getElementById("diary-popup-overlay").classList.remove("hidden");
+  setTimeout(() => content.focus(), 60);
+}
+
+function saveDiaryContent() {
+  if (!diaryCurrentListId) return;
+  const list = getCategory("diary").find((l) => l.id === diaryCurrentListId);
+  if (!list) return;
+  list.content = document.getElementById("dy-content").innerHTML;
+  saveState();
+}
+
+function closeDiaryPopup() {
+  saveDiaryContent();
+  closeAllDiaryDropdowns();
+  document.getElementById("diary-popup-overlay").classList.add("hidden");
+  const whTab = document.querySelector('.tab-content[data-content="warehouse"]');
+  if (whTab && !whTab.classList.contains("hidden") && wh.cat === "diary") {
+    renderWarehouseTab();
+  }
+}
+
+function scheduleDiaryAutosave() {
+  clearTimeout(diaryAutosaveHandle);
+  diaryAutosaveHandle = setTimeout(saveDiaryContent, 800);
+}
+
+document.getElementById("diary-quick-open").addEventListener("click", () => openDiaryPopup());
+document.getElementById("wh-diary-open-editor").addEventListener("click", () => {
+  const list = whActiveList();
+  openDiaryPopup(list ? list.id : null);
+});
+document.getElementById("dy-close-btn").addEventListener("click", closeDiaryPopup);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("diary-popup-overlay").classList.contains("hidden")) {
+    closeDiaryPopup();
+  }
+});
+window.addEventListener("beforeunload", () => {
+  if (!document.getElementById("diary-popup-overlay").classList.contains("hidden")) {
+    saveDiaryContent();
+  }
+});
+// NOTE: clicking the backdrop intentionally does NOT close this popup (per request),
+// unlike the other overlays in the app.
+
+document.getElementById("dy-note-select").addEventListener("change", (e) => {
+  saveDiaryContent();
+  const list = getCategory("diary").find((l) => l.id === e.target.value);
+  if (!list) return;
+  diaryCurrentListId = list.id;
+  state.activeWhList.diary = list.id;
+  document.getElementById("dy-content").innerHTML = list.content || "";
+  saveState();
+});
+
+document.getElementById("dy-content").addEventListener("input", scheduleDiaryAutosave);
+
+/* ---- formatting commands ---- */
+function diaryExec(cmd, value = null) {
+  const content = document.getElementById("dy-content");
+  content.focus();
+  try {
+    document.execCommand(cmd, false, value);
+  } catch (e) {
+    /* execCommand is legacy but broadly supported; fail silently if unavailable */
+  }
+  scheduleDiaryAutosave();
+}
+document.getElementById("dy-bold-btn").addEventListener("click", () => diaryExec("bold"));
+document.getElementById("dy-italic-btn").addEventListener("click", () => diaryExec("italic"));
+document.getElementById("dy-underline-btn").addEventListener("click", () => diaryExec("underline"));
+
+/* undo / redo */
+document.getElementById("dy-undo-btn").addEventListener("click", () => diaryExec("undo"));
+document.getElementById("dy-redo-btn").addEventListener("click", () => diaryExec("redo"));
+
+/* font size dropdown */
+function closeAllDiaryDropdowns() {
+  document.getElementById("dy-fontsize-menu").classList.add("hidden");
+  document.getElementById("dy-align-menu").classList.add("hidden");
+}
+document.getElementById("dy-fontsize-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("dy-fontsize-menu");
+  const wasHidden = menu.classList.contains("hidden");
+  closeAllDiaryDropdowns();
+  menu.classList.toggle("hidden", !wasHidden);
+});
+document.querySelectorAll("#dy-fontsize-menu [data-size]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    diaryExec("fontSize", btn.dataset.size);
+    document.getElementById("dy-fontsize-btn").textContent = btn.textContent + " ▾";
+    document.getElementById("dy-fontsize-menu").classList.add("hidden");
+  });
+});
+
+/* alignment / list dropdown */
+document.getElementById("dy-align-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("dy-align-menu");
+  const wasHidden = menu.classList.contains("hidden");
+  closeAllDiaryDropdowns();
+  menu.classList.toggle("hidden", !wasHidden);
+});
+document.querySelectorAll("#dy-align-menu [data-cmd]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    diaryExec(btn.dataset.cmd);
+    document.getElementById("dy-align-menu").classList.add("hidden");
+  });
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".diary-dd-wrap")) closeAllDiaryDropdowns();
+});
+
+/* text color */
+document.getElementById("dy-color-btn").addEventListener("click", () => {
+  document.getElementById("dy-color-input").click();
+});
+document.getElementById("dy-color-input").addEventListener("input", (e) => {
+  diaryExec("foreColor", e.target.value);
+  document.getElementById("dy-color-btn").style.color = e.target.value;
+  document.getElementById("dy-color-btn").style.borderColor = e.target.value;
+});
+
+/* ---- Highlight & Đóng khung: custom toggle-on/toggle-off spans ----
+   (not using execCommand hiliteColor, since it can't reliably be
+   detected/removed on re-selection — these need real toggle behaviour) */
+function unwrapSpan(span) {
+  const parent = span.parentNode;
+  if (!parent) return;
+  while (span.firstChild) parent.insertBefore(span.firstChild, span);
+  parent.removeChild(span);
+}
+function wrapRangeInSpan(range, className) {
+  const span = document.createElement("span");
+  span.className = className;
+  try {
+    range.surroundContents(span);
+  } catch (err) {
+    const frag = range.extractContents();
+    span.appendChild(frag);
+    range.insertNode(span);
+  }
+  return span;
+}
+function toggleInlineSpanClass(className, emptyMessage) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) {
+    showToast(emptyMessage);
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  let container = range.commonAncestorContainer;
+  if (container.nodeType === 3) container = container.parentElement;
+  const existing = container && container.closest ? container.closest("." + className) : null;
+  if (existing) {
+    unwrapSpan(existing);
+  } else {
+    wrapRangeInSpan(range, className);
+  }
+  sel.removeAllRanges();
+  scheduleDiaryAutosave();
+}
+document.getElementById("dy-highlight-btn").addEventListener("click", () => {
+  toggleInlineSpanClass("diary-highlight", "Hãy bôi đen đoạn chữ cần highlight trước.");
+});
+document.getElementById("dy-box-btn").addEventListener("click", () => {
+  toggleInlineSpanClass("diary-boxed", "Hãy bôi đen đoạn chữ cần đóng khung trước.");
+});
+
+/* edit / view mode toggle */
+document.getElementById("dy-mode-btn").addEventListener("click", () => {
+  const content = document.getElementById("dy-content");
+  const isCurrentlyEditable = content.contentEditable === "true";
+  if (isCurrentlyEditable) {
+    saveDiaryContent();
+    content.contentEditable = "false";
+  } else {
+    content.contentEditable = "true";
+    content.focus();
+  }
+  document.getElementById("dy-mode-btn").classList.toggle("active-state", isCurrentlyEditable);
+});
+
+/* keyboard shortcuts while editing */
+document.getElementById("dy-content").addEventListener("keydown", (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl) return;
+  const key = e.key.toLowerCase();
+  if (!e.shiftKey && key === "b") { e.preventDefault(); diaryExec("bold"); }
+  else if (!e.shiftKey && key === "i") { e.preventDefault(); diaryExec("italic"); }
+  else if (!e.shiftKey && key === "u") { e.preventDefault(); diaryExec("underline"); }
+  else if (!e.shiftKey && key === "z") { e.preventDefault(); diaryExec("undo"); }
+  else if (!e.shiftKey && key === "y") { e.preventDefault(); diaryExec("redo"); }
+  else if (e.shiftKey && key === "h") { e.preventDefault(); document.getElementById("dy-highlight-btn").click(); }
+  else if (e.shiftKey && key === "d") { e.preventDefault(); document.getElementById("dy-box-btn").click(); }
+  else if (e.shiftKey && key === "l") { e.preventDefault(); diaryExec("justifyLeft"); }
+  else if (e.shiftKey && key === "e") { e.preventDefault(); diaryExec("justifyCenter"); }
+  else if (e.shiftKey && key === "r") { e.preventDefault(); diaryExec("justifyRight"); }
+  else if (e.shiftKey && key === "m") { e.preventDefault(); document.getElementById("dy-mode-btn").click(); }
+  else if (e.shiftKey && e.code === "Digit7") { e.preventDefault(); diaryExec("insertOrderedList"); }
+  else if (e.shiftKey && e.code === "Digit8") { e.preventDefault(); diaryExec("insertUnorderedList"); }
+  else if (e.key === ">") { e.preventDefault(); diaryExec("fontSize", "5"); document.getElementById("dy-fontsize-btn").textContent = "Lớn ▾"; }
+  else if (e.key === "<") { e.preventDefault(); diaryExec("fontSize", "2"); document.getElementById("dy-fontsize-btn").textContent = "Nhỏ ▾"; }
+});
+
 
 /* ============================================================
    INIT
