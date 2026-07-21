@@ -97,6 +97,17 @@
           <button class="pill-btn active" data-source="flashcard">Thẻ</button>
           <button class="pill-btn" data-source="dictionary">Từ điển</button>
         </div>
+        <button class="block-btn" id="quiz-choose-list">Chọn danh sách</button>
+
+        <div class="section-label">Độ khó</div>
+        <div class="btn-row-2">
+          <button class="quiz-diff-btn active" data-difficulty="all"><span class="dot dot-all"></span>Tất cả</button>
+          <button class="quiz-diff-btn" data-difficulty="new"><span class="dot dot-learning"></span>Đang học</button>
+        </div>
+        <div class="btn-row-2">
+          <button class="quiz-diff-btn" data-difficulty="known"><span class="dot dot-known"></span>Đã biết</button>
+          <button class="quiz-diff-btn" data-difficulty="difficult"><span class="dot dot-difficult"></span>Khó</button>
+        </div>
 
         <div class="section-label">Số câu</div>
         <div class="btn-row-2">
@@ -132,7 +143,16 @@
 
     <!-- ---- Sidebar: Warehouse list grid ---- -->
     <div class="sidebar-panel hidden" data-panel="warehouse">
-      <div class="section-label" id="wh-lists-title">Thẻ</div>
+      <div class="wh-lists-title-row">
+        <span class="section-label" id="wh-lists-title">Thẻ</span>
+        <div class="diary-dd-wrap">
+          <button class="wh-sort-btn" id="wh-sort-btn" title="Sắp xếp danh sách">⇅</button>
+          <div class="diary-dropdown-menu hidden" id="wh-sort-menu">
+            <button type="button" data-sort="date">Theo ngày</button>
+            <button type="button" data-sort="name">Theo tên</button>
+          </div>
+        </div>
+      </div>
       <div class="wh-list-grid" id="wh-list-grid"></div>
       <div class="btn-row-3">
         <button class="icon-btn-sq" id="wh-add-list" title="Thêm danh sách">＋</button>
@@ -262,6 +282,7 @@
       <div class="wh-toolbar" id="wh-toolbar">
         <div class="wh-toolbar-right">
           <button class="pill-btn-outline" id="wh-clear-all">Xóa hết</button>
+          <button class="pill-btn-outline hidden" id="wh-reminder-toggle" title="Bật/tắt thông báo nhắc từ ngẫu nhiên">🔔 Nhắc từ</button>
           <span class="wh-progress" id="wh-progress">Tiến độ: 0%</span>
           <button class="pill-btn-outline" id="wh-reset-status">Đặt lại trạng thái</button>
           <button class="pill-btn primary" id="wh-add-items">Thêm vào</button>
@@ -369,7 +390,7 @@
     <div class="diary-toolbar">
       <div class="diary-toolbar-left">
         <div class="diary-dd-wrap">
-          <button class="diary-tool-btn diary-fontsize-btn" id="dy-fontsize-btn" title="Cỡ chữ">14 ▾</button>
+          <button class="diary-tool-btn diary-fontsize-btn" id="dy-fontsize-btn" title="Cỡ chữ">Vừa ▾</button>
           <div class="diary-dropdown-menu hidden" id="dy-fontsize-menu">
             <button type="button" data-size="2">Nhỏ</button>
             <button type="button" data-size="3">Vừa</button>
@@ -414,6 +435,17 @@
     <div class="diary-content" id="dy-content" contenteditable="true" spellcheck="false"
          data-placeholder="Viết gì đó ..."></div>
   </div>
+</div>
+
+<!-- ============ REMINDER (NHẮC TỪ) POPUP ============ -->
+<div class="reminder-popup hidden" id="reminder-popup">
+  <div class="reminder-popup-header">
+    <span id="reminder-popup-source">Nhắc từ vựng</span>
+    <button class="popup-close" id="reminder-popup-close">✕</button>
+  </div>
+  <div class="reminder-popup-en" id="reminder-popup-en"></div>
+  <div class="reminder-popup-vi" id="reminder-popup-vi"></div>
+  <div class="reminder-popup-bar"><div class="reminder-popup-bar-fill" id="reminder-popup-bar-fill"></div></div>
 </div>
 
 <!-- ============ TOAST ============ -->

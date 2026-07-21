@@ -9,10 +9,10 @@ function uid() {
 }
 
 function defaultList(name) {
-  return { id: uid(), name, items: [] };
+  return { id: uid(), name, items: [], createdAt: Date.now(), reminderEnabled: false };
 }
 function defaultDiaryList(name) {
-  return { id: uid(), name, content: "" };
+  return { id: uid(), name, content: "", createdAt: Date.now() };
 }
 
 function defaultState() {
@@ -26,6 +26,7 @@ function defaultState() {
     },
     selected: { flashcard: [], writing: [] },
     activeWhList: { flashcard: null, writing: null, dictionary: null, diary: null },
+    reminder: { enabled: false },
   };
 }
 
@@ -42,6 +43,14 @@ function loadState() {
       parsed.categories.diary = [defaultDiaryList("Nhật ký 1")];
     }
     if (!("diary" in parsed.activeWhList)) parsed.activeWhList.diary = null;
+    if (!parsed.reminder) parsed.reminder = { enabled: false };
+    // backfill createdAt for lists saved before this field existed, preserving
+    // their existing relative order
+    Object.keys(parsed.categories).forEach((catKey) => {
+      parsed.categories[catKey].forEach((list, idx) => {
+        if (!list.createdAt) list.createdAt = Date.now() - (parsed.categories[catKey].length - idx) * 1000;
+      });
+    });
     if (!parsed.themeLevel) {
       // migrate from old light/dark boolean theme if present
       parsed.themeLevel = parsed.theme === "dark" ? 4 : 1;
@@ -167,29 +176,51 @@ document.querySelectorAll(".theme-dot").forEach((dot) => {
 applyThemeLevel(Math.min(4, state.themeLevel || 1), false);
 
 /* ============================================================
-   LIST PICKER POPUP (used by Thẻ + Viết "Chọn danh sách")
+   LIST PICKER POPUP (used by Thẻ / Viết / Quizz "Chọn danh sách")
    ============================================================ */
 const listPickerOverlay = document.getElementById("list-picker-overlay");
 const listPickerBody = document.getElementById("list-picker-body");
 const listPickerTitle = document.getElementById("list-picker-title");
-let listPickerCat = null;
+let listPickerCat = null; // one of: "flashcard", "writing", "quiz-flashcard", "quiz-dictionary"
+
+// resolves a virtual picker key to { realCat, getArr(), ensureDefault() }
+function pickerContext(cat) {
+  if (cat === "quiz-flashcard" || cat === "quiz-dictionary") {
+    const realCat = cat === "quiz-flashcard" ? "flashcard" : "dictionary";
+    return {
+      realCat,
+      getArr: () => quiz.selectedLists[realCat],
+      ensureDefault: () => ensureQuizSelected(realCat),
+      allowEmpty: false, // ensureQuizSelected always fills with "all" instead of leaving empty
+    };
+  }
+  return {
+    realCat: cat,
+    getArr: () => state.selected[cat],
+    ensureDefault: () => ensureSelected(cat),
+    allowEmpty: false,
+  };
+}
 
 function openListPicker(cat) {
   listPickerCat = cat;
-  listPickerTitle.textContent = cat === "flashcard" ? "Thẻ" : "Viết";
-  ensureSelected(cat);
+  const titles = { flashcard: "Thẻ", writing: "Viết", "quiz-flashcard": "Thẻ (Quizz)", "quiz-dictionary": "Từ điển (Quizz)" };
+  listPickerTitle.textContent = titles[cat] || cat;
+  const ctx = pickerContext(cat);
+  ctx.ensureDefault();
   renderListPickerBody();
   listPickerOverlay.classList.remove("hidden");
 }
 function renderListPickerBody() {
   listPickerBody.innerHTML = "";
-  getCategory(listPickerCat).forEach((list) => {
+  const ctx = pickerContext(listPickerCat);
+  getCategory(ctx.realCat).forEach((list) => {
     const row = document.createElement("div");
-    const selected = state.selected[listPickerCat].includes(list.id);
+    const selected = ctx.getArr().includes(list.id);
     row.className = "popup-list-item" + (selected ? " selected" : "");
     row.innerHTML = `<span class="dot"></span><span>${escapeHtml(list.name)}</span>`;
     row.addEventListener("click", () => {
-      const arr = state.selected[listPickerCat];
+      const arr = ctx.getArr();
       const idx = arr.indexOf(list.id);
       if (idx >= 0) {
         if (arr.length > 1) arr.splice(idx, 1);
@@ -974,6 +1005,8 @@ const qtFlashcard = createQuickTranslateBar("qt2");
    ============================================================ */
 const quiz = {
   source: "flashcard",
+  selectedLists: { flashcard: [], dictionary: [] },
+  difficulty: "all", // "all" | "new" | "known" | "difficult"
   countMode: "custom",
   count: 10,
   lang: "random",
@@ -991,11 +1024,35 @@ const quiz = {
   answered: false,
 };
 
+// unlike Thẻ/Viết (which fall back to "just the first list"), quiz defaults
+// to using EVERY list in the source category until the user narrows it down
+function ensureQuizSelected(cat) {
+  const ids = getCategory(cat).map((l) => l.id);
+  quiz.selectedLists[cat] = quiz.selectedLists[cat].filter((id) => ids.includes(id));
+  if (quiz.selectedLists[cat].length === 0) quiz.selectedLists[cat] = ids.slice();
+}
+function quizSourceItems() {
+  ensureQuizSelected(quiz.source);
+  let items = itemsFromLists(quiz.source, quiz.selectedLists[quiz.source]);
+  if (quiz.difficulty !== "all") items = items.filter((i) => i.status === quiz.difficulty);
+  return items;
+}
+
 document.querySelectorAll('[data-source]').forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll('[data-source]').forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     quiz.source = btn.dataset.source;
+  });
+});
+document.getElementById("quiz-choose-list").addEventListener("click", () => {
+  openListPicker(quiz.source === "flashcard" ? "quiz-flashcard" : "quiz-dictionary");
+});
+document.querySelectorAll('[data-difficulty]').forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[data-difficulty]').forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    quiz.difficulty = btn.dataset.difficulty;
   });
 });
 document.querySelectorAll('[data-countmode]').forEach((btn) => {
@@ -1029,7 +1086,7 @@ document.getElementById("quiz-count-input").addEventListener("input", (e) => {
 });
 
 function buildQuizQuestions() {
-  const pool = allItems(quiz.source).filter((i) => i.en && i.vi);
+  const pool = quizSourceItems().filter((i) => i.en && i.vi);
   const shuffled = shuffleArr(pool);
   const n = quiz.countMode === "untilWrong" ? shuffled.length : Math.min(quiz.count, shuffled.length);
   const chosen = shuffled.slice(0, n);
@@ -1046,9 +1103,9 @@ function buildQuizQuestions() {
 }
 
 document.getElementById("quiz-start-btn").addEventListener("click", () => {
-  const pool = allItems(quiz.source).filter((i) => i.en && i.vi);
+  const pool = quizSourceItems().filter((i) => i.en && i.vi);
   if (pool.length < 4) {
-    showToast("Cần ít nhất 4 mục có đủ nghĩa Anh - Việt trong nguồn đã chọn.");
+    showToast("Cần ít nhất 4 mục có đủ nghĩa Anh - Việt trong danh sách & độ khó đã chọn.");
     return;
   }
   quiz.questions = buildQuizQuestions();
@@ -1241,10 +1298,25 @@ function renderWarehouseTab() {
   const grid = document.getElementById("wh-list-grid");
   grid.innerHTML = "";
   const activeList = whActiveList();
+  const canRemind = wh.cat === "flashcard" || wh.cat === "dictionary";
   getCategory(wh.cat).forEach((list) => {
     const btn = document.createElement("button");
     btn.className = "wh-list-item" + (activeList && list.id === activeList.id ? " active" : "");
-    btn.textContent = list.name;
+    btn.innerHTML = `<span class="wh-list-item-name">${escapeHtml(list.name)}</span>`;
+    if (canRemind) {
+      const dot = document.createElement("span");
+      dot.className = "wh-list-reminder-dot" + (list.reminderEnabled ? " on" : "");
+      dot.textContent = "🔔";
+      dot.title = list.reminderEnabled ? "Đang bật nhắc từ cho danh sách này — nhấn để tắt" : "Bật nhắc từ cho danh sách này";
+      dot.addEventListener("click", (e) => {
+        e.stopPropagation();
+        list.reminderEnabled = !list.reminderEnabled;
+        saveState();
+        renderWarehouseTab();
+        if (state.reminder.enabled) reminderRefillQueue();
+      });
+      btn.appendChild(dot);
+    }
     btn.addEventListener("click", () => {
       state.activeWhList[wh.cat] = list.id;
       saveState();
@@ -1258,6 +1330,8 @@ function renderWarehouseTab() {
   document.getElementById("wh-diary-preview").classList.toggle("hidden", !isDiary);
   document.getElementById("wh-toolbar").classList.toggle("hidden", isDiary);
   document.getElementById("wh-legend").classList.toggle("hidden", isDiary);
+  document.getElementById("wh-reminder-toggle").classList.toggle("hidden", !canRemind);
+  document.getElementById("wh-reminder-toggle").classList.toggle("active", state.reminder.enabled);
 
   if (!isDiary) {
     const legendMap = {
@@ -1637,6 +1711,87 @@ document.getElementById("wh-import-file").addEventListener("change", (e) => {
 });
 
 /* ============================================================
+   NHẮC TỪ (REMINDER) — bottom-left popup with random word every 5s,
+   sourced from Thẻ/Từ điển lists individually toggled on
+   ============================================================ */
+const reminder = { timerHandle: null, hideTimeout: null, queue: [], lastShown: null };
+
+function reminderEligibleItems() {
+  let items = [];
+  ["flashcard", "dictionary"].forEach((cat) => {
+    getCategory(cat).forEach((list) => {
+      if (!list.reminderEnabled) return;
+      list.items.forEach((item) => {
+        if (item.en && item.vi) items.push({ ...item, _catLabel: whCatLabel(cat), _listName: list.name });
+      });
+    });
+  });
+  return items;
+}
+
+function reminderRefillQueue() {
+  const pool = reminderEligibleItems();
+  let shuffled = shuffleArr(pool);
+  // avoid an immediate repeat right across a cycle boundary
+  if (shuffled.length > 1 && reminder.lastShown && shuffled[0].id === reminder.lastShown.id) {
+    [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+  }
+  reminder.queue = shuffled;
+}
+
+function showNextReminder() {
+  if (!reminder.queue.length) reminderRefillQueue();
+  if (!reminder.queue.length) return; // nothing enabled/eligible — stay silent
+  const item = reminder.queue.shift();
+  reminder.lastShown = item;
+
+  const popup = document.getElementById("reminder-popup");
+  document.getElementById("reminder-popup-source").textContent = `${item._catLabel} — ${item._listName}`;
+  document.getElementById("reminder-popup-en").textContent = item.en;
+  document.getElementById("reminder-popup-vi").textContent = item.vi;
+
+  popup.classList.remove("hidden");
+  // restart the CSS countdown-bar animation
+  const bar = document.getElementById("reminder-popup-bar-fill");
+  bar.style.animation = "none";
+  void bar.offsetWidth;
+  bar.style.animation = "";
+
+  clearTimeout(reminder.hideTimeout);
+  reminder.hideTimeout = setTimeout(() => popup.classList.add("hidden"), 5000);
+}
+
+function startReminderCycle() {
+  stopReminderCycle();
+  reminderRefillQueue();
+  showNextReminder();
+  reminder.timerHandle = setInterval(showNextReminder, 5000);
+}
+function stopReminderCycle() {
+  clearInterval(reminder.timerHandle);
+  clearTimeout(reminder.hideTimeout);
+  reminder.timerHandle = null;
+  document.getElementById("reminder-popup").classList.add("hidden");
+}
+document.getElementById("reminder-popup-close").addEventListener("click", () => {
+  document.getElementById("reminder-popup").classList.add("hidden");
+  clearTimeout(reminder.hideTimeout);
+});
+document.getElementById("wh-reminder-toggle").addEventListener("click", () => {
+  state.reminder.enabled = !state.reminder.enabled;
+  saveState();
+  document.getElementById("wh-reminder-toggle").classList.toggle("active", state.reminder.enabled);
+  if (state.reminder.enabled) {
+    if (!reminderEligibleItems().length) {
+      showToast("Hãy bật nhắc từ (🔔) cho ít nhất một danh sách trong lưới bên trái trước.");
+    }
+    startReminderCycle();
+  } else {
+    stopReminderCycle();
+  }
+});
+
+/* ============================================================
    NHẬT KÝ (DIARY) — quick popup rich-text editor
    ============================================================ */
 let diaryCurrentListId = null;
@@ -1757,10 +1912,9 @@ document.getElementById("dy-underline-btn").addEventListener("click", () => diar
 document.getElementById("dy-undo-btn").addEventListener("click", () => diaryExec("undo"));
 document.getElementById("dy-redo-btn").addEventListener("click", () => diaryExec("redo"));
 
-/* font size dropdown */
+/* generic dropdown menu handling (shared by diary toolbar + Kho sort menu) */
 function closeAllDiaryDropdowns() {
-  document.getElementById("dy-fontsize-menu").classList.add("hidden");
-  document.getElementById("dy-align-menu").classList.add("hidden");
+  document.querySelectorAll(".diary-dropdown-menu").forEach((m) => m.classList.add("hidden"));
 }
 document.getElementById("dy-fontsize-btn").addEventListener("click", (e) => {
   e.stopPropagation();
@@ -1793,6 +1947,28 @@ document.querySelectorAll("#dy-align-menu [data-cmd]").forEach((btn) => {
 });
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".diary-dd-wrap")) closeAllDiaryDropdowns();
+});
+
+/* Kho: sort danh sách dropdown (Theo ngày / Theo tên) */
+document.getElementById("wh-sort-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("wh-sort-menu");
+  const wasHidden = menu.classList.contains("hidden");
+  closeAllDiaryDropdowns();
+  menu.classList.toggle("hidden", !wasHidden);
+});
+document.querySelectorAll("#wh-sort-menu [data-sort]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const list = getCategory(wh.cat);
+    if (btn.dataset.sort === "date") {
+      list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    } else {
+      list.sort((a, b) => a.name.localeCompare(b.name, "vi"));
+    }
+    saveState();
+    renderWarehouseTab();
+    document.getElementById("wh-sort-menu").classList.add("hidden");
+  });
 });
 
 /* text color */
@@ -1894,4 +2070,5 @@ document.getElementById("dy-content").addEventListener("keydown", (e) => {
 ensureSelected("flashcard");
 ensureSelected("writing");
 renderFlashcardTab();
+if (state.reminder.enabled) startReminderCycle();
 saveState();

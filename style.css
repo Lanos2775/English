@@ -68,9 +68,9 @@ input,textarea{font-family:inherit;}
 }
 .sidebar-header-right{display:flex;align-items:center;gap:8px;}
 .diary-quick-btn{
-  width:36px;height:36px;
+  width:44px;height:36px;
   border:1.5px solid var(--border);
-  border-radius:50%;
+  border-radius:var(--radius-sm);
   background:var(--panel);
   font-size:1rem;
   display:flex;align-items:center;justify-content:center;
@@ -148,6 +148,17 @@ input,textarea{font-family:inherit;}
 
 .panel-section{display:flex;flex-direction:column;gap:8px;}
 .section-label{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-top:4px;}
+.wh-lists-title-row{display:flex;align-items:center;justify-content:space-between;margin-top:4px;}
+.wh-lists-title-row .section-label{margin-top:0;}
+.wh-sort-btn{
+  width:24px;height:24px;
+  border:1.5px solid var(--border);
+  border-radius:6px;
+  background:var(--panel);color:var(--text-muted);
+  font-size:.75rem;
+  display:flex;align-items:center;justify-content:center;
+}
+.wh-sort-btn:hover{background:var(--accent-soft);color:var(--text);}
 
 .text-input{
   width:100%;
@@ -212,8 +223,18 @@ input,textarea{font-family:inherit;}
   font-weight:600;
   text-align:center;
   background:var(--panel);
+  position:relative;
 }
 .wh-list-item.active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
+.wh-list-item-name{display:block;padding-right:2px;}
+.wh-list-reminder-dot{
+  position:absolute;top:2px;right:3px;
+  font-size:.6rem;
+  opacity:.3;
+  filter:grayscale(1);
+}
+.wh-list-reminder-dot:hover{opacity:.7;}
+.wh-list-reminder-dot.on{opacity:1;filter:none;}
 .icon-btn-sq{
   width:100%;height:36px;border:1.5px solid var(--border);border-radius:var(--radius-sm);
   background:var(--panel);color:var(--text);font-size:.9rem;
@@ -497,6 +518,19 @@ input,textarea{font-family:inherit;}
 .dot-learning{background:var(--learning);}
 .dot-known{background:var(--known);}
 .dot-difficult{background:var(--difficult);}
+.dot-all{background:var(--text);}
+
+.quiz-diff-btn{
+  display:flex;align-items:center;gap:7px;justify-content:center;
+  border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);
+  padding:8px 6px;
+  font-size:.78rem;font-weight:600;
+  background:var(--panel);color:var(--text);
+}
+.quiz-diff-btn:hover{background:var(--accent-soft);}
+.quiz-diff-btn.active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
+.quiz-diff-btn .dot{width:8px;height:8px;flex-shrink:0;}
 
 .wh-toolbar{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;}
 .wh-toolbar-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -648,6 +682,42 @@ input,textarea{font-family:inherit;}
   padding:0 1px;
 }
 body[data-theme-level="4"] .diary-highlight{color:#111114;}
+
+/* ============ REMINDER (NHẮC TỪ) POPUP ============ */
+.reminder-popup{
+  position:fixed;bottom:24px;left:24px;
+  width:300px;
+  background:var(--panel);
+  border:1.5px solid var(--border);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow);
+  padding:14px 16px 0;
+  z-index:250;
+  overflow:hidden;
+  animation:reminderIn .25s ease;
+}
+@keyframes reminderIn{
+  from{opacity:0;transform:translateY(10px);}
+  to{opacity:1;transform:translateY(0);}
+}
+.reminder-popup-header{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;
+  color:var(--text-muted);margin-bottom:10px;
+}
+.reminder-popup-en{font-size:1.1rem;font-weight:700;margin-bottom:4px;}
+.reminder-popup-vi{font-size:.85rem;color:var(--text-muted);margin-bottom:12px;}
+.reminder-popup-bar{height:3px;background:var(--border-soft);margin:0 -16px;}
+.reminder-popup-bar-fill{
+  height:100%;background:var(--accent);width:100%;
+  animation:reminderCountdown 5s linear forwards;
+}
+@keyframes reminderCountdown{
+  from{width:100%;}
+  to{width:0%;}
+}
+
+/* ============ TOAST ============ */
 .toast-container{
   position:fixed;bottom:26px;left:50%;transform:translateX(-50%);
   display:flex;flex-direction:column;gap:8px;z-index:300;
